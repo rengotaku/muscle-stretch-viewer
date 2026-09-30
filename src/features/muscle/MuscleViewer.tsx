@@ -503,7 +503,14 @@ export const MuscleViewer: React.FC = () => {
         <div className="font-semibold text-slate-100 mb-2 flex items-center justify-between">
           <span>伸び率の凡例 (Color Legend)</span>
         </div>
-        <div className="w-full h-3 rounded-full mb-1.5 bg-gradient-to-r from-[#1e3a8a] via-[#38bdf8] via-[#f0f0f0] via-[#facc15] to-[#ef4444]" />
+        {/* 5 つの停止点は getStretchColorHex の 0.8 / 0.9 / 1.0 / 1.1 / 1.2 と一致させる（Tailwind の via-* は重ねると上書きされ 1 点しか効かない） */}
+        <div
+          className="w-full h-3 rounded-full mb-1.5"
+          style={{
+            background:
+              "linear-gradient(to right, #1e3a8a 0%, #38bdf8 25%, #f0f0f0 50%, #facc15 75%, #ef4444 100%)",
+          }}
+        />
         <div className="flex justify-between text-[10px] text-slate-400 mb-2 font-mono">
           <span>≤ 0.8</span>
           <span>0.9</span>
