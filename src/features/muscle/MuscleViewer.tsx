@@ -13,6 +13,14 @@ import {
   BODY_PART_GROUPS,
   MyoSimulation,
 } from "./stretch";
+import {
+  applyPreset,
+  capturePose,
+  deletePreset,
+  loadPresets,
+  savePreset,
+  type PosePreset,
+} from "./presets";
 
 interface LoadingStatus {
   loaded: number;
@@ -70,6 +78,9 @@ export const MuscleViewer: React.FC = () => {
   // Independent joints list & angle states (stored in radians)
   const [joints, setJoints] = useState<IndependentJointInfo[]>([]);
   const [jointAngles, setJointAngles] = useState<Record<string, number>>({});
+  const [presets, setPresets] = useState<PosePreset[]>(() => loadPresets());
+  const [presetName, setPresetName] = useState("");
+  const [presetError, setPresetError] = useState<string | null>(null);
   const [openGroups, setOpenGroups] = useState<Record<BodyPartGroupId, boolean>>({
     torso: true,
     leg_r: true,
@@ -250,6 +261,44 @@ export const MuscleViewer: React.FC = () => {
     },
     [syncAnglesFromSim, updateMuscleMeshes, updateSkeletonMeshes]
   );
+
+  // Save the current pose as a named preset
+  const handleSavePreset = useCallback(() => {
+    const sim = simRef.current;
+    if (!sim) return;
+    const result = savePreset(presetName, capturePose(sim));
+    if (result.ok) {
+      setPresets(result.presets);
+      setPresetName("");
+      setPresetError(null);
+    } else {
+      setPresetError(result.error);
+    }
+  }, [presetName]);
+
+  // Load a preset through the same update path as the pose buttons
+  const handleLoadPreset = useCallback(
+    (preset: PosePreset) => {
+      const sim = simRef.current;
+      if (!sim) return;
+      applyPreset(sim, preset);
+      updateSkeletonMeshes(sim);
+      updateMuscleMeshes(sim);
+      syncAnglesFromSim(sim);
+      setCurrentPose("custom");
+    },
+    [syncAnglesFromSim, updateMuscleMeshes, updateSkeletonMeshes]
+  );
+
+  const handleDeletePreset = useCallback((name: string) => {
+    const result = deletePreset(name);
+    if (result.ok) {
+      setPresets(result.presets);
+      setPresetError(null);
+    } else {
+      setPresetError(result.error);
+    }
+  }, []);
 
   // Handle slider change: setJointAngle (calculates dependent joints) -> update skeleton -> update muscles
   const handleSliderChange = useCallback(
@@ -757,6 +806,70 @@ export const MuscleViewer: React.FC = () => {
                 全閉
               </button>
             </div>
+          </div>
+
+          {/* Pose presets (localStorage) */}
+          <div className="mt-3 rounded-lg border border-slate-800/90 bg-slate-950/40 p-3 text-xs">
+            <div className="font-semibold text-slate-100 mb-2">プリセット</div>
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                aria-label="プリセット名"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder="名前を入力"
+                className="flex-1 min-w-0 px-2 py-1 rounded bg-slate-800 text-slate-100 placeholder:text-slate-500 border border-slate-700"
+              />
+              <button
+                type="button"
+                aria-label="プリセットを保存"
+                onClick={handleSavePreset}
+                className="shrink-0 px-2.5 py-1 rounded bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                保存
+              </button>
+            </div>
+            {presetError && (
+              <p role="alert" className="mt-1.5 text-[11px] text-red-400">
+                {presetError}
+              </p>
+            )}
+            {presets.length === 0 ? (
+              <p className="mt-2 text-[11px] text-slate-500">
+                保存済みのプリセットはありません
+              </p>
+            ) : (
+              <ul className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                {presets.map((preset) => (
+                  <li
+                    key={preset.name}
+                    className="flex items-center justify-between gap-2 py-1 border-b border-slate-800/70"
+                  >
+                    <span className="min-w-0 truncate text-slate-300" title={preset.name}>
+                      {preset.name}
+                    </span>
+                    <span className="flex gap-1 shrink-0">
+                      <button
+                        type="button"
+                        aria-label={`${preset.name} を読み込む`}
+                        onClick={() => handleLoadPreset(preset)}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                      >
+                        読み込む
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`${preset.name} を削除`}
+                        onClick={() => handleDeletePreset(preset.name)}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-red-900 text-slate-300 transition-colors"
+                      >
+                        削除
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Group list with scroll */}
