@@ -100,6 +100,65 @@ export interface MuscleTendonPath {
 }
 
 /**
+ * Information about an independent controllable joint.
+ */
+export interface IndependentJointInfo {
+  id: number;
+  name: string;
+  qposadr: number;
+  range: [number, number];
+  min: number;
+  max: number;
+  defaultValue: number;
+}
+
+/**
+ * Internal representation of an equality joint constraint.
+ */
+export interface EqualityJointConstraint {
+  id: number;
+  depJointId: number;
+  depQposAdr: number;
+  qpos0Dep: number;
+  srcJointId: number;
+  srcQposAdr: number;
+  qpos0Src: number;
+  polycoef: [number, number, number, number, number];
+}
+
+/**
+ * Evaluates the 4th-order polynomial used by MuJoCo equality constraints:
+ * poly(x) = c0 + c1*x + c2*x^2 + c3*x^3 + c4*x^4
+ */
+export function evaluatePolynomial(polycoef: ArrayLike<number>, x: number): number {
+  return (
+    polycoef[0] +
+    polycoef[1] * x +
+    polycoef[2] * x * x +
+    polycoef[3] * x * x * x +
+    polycoef[4] * x * x * x * x
+  );
+}
+
+/**
+ * Calculates dependent joint position given constraint polynomial and source position.
+ * q_dep = qpos0_dep + c0 + c1·x + c2·x² + c3·x³ + c4·x⁴ (x = q_src − qpos0_src)
+ * If no source joint (srcJointId === -1), q_dep = qpos0_dep + c0.
+ */
+export function calculateDependentJointPosition(
+  qpos0Dep: number,
+  polycoef: ArrayLike<number>,
+  qSrc?: number,
+  qpos0Src?: number
+): number {
+  if (qSrc === undefined || qpos0Src === undefined) {
+    return qpos0Dep + polycoef[0];
+  }
+  const x = qSrc - qpos0Src;
+  return qpos0Dep + evaluatePolynomial(polycoef, x);
+}
+
+/**
  * Extracted mesh data for a skeletal bone geom.
  */
 export interface SkeletonMeshData {
@@ -125,12 +184,84 @@ export class MyoSimulation {
   loadTimeMs?: number;
 
   private readonly cachedBaseLengths: Float64Array;
+  private readonly equalityConstraints: EqualityJointConstraint[] = [];
+  private readonly independentJoints: IndependentJointInfo[] = [];
+  private readonly jointMap = new Map<
+    string | number,
+    { id: number; name: string; qposadr: number; range?: [number, number] }
+  >();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(mujoco: any, model: any, data: any) {
     this.mujoco = mujoco;
     this.model = model;
     this.data = data;
+
+    // Parse equality constraints (type 2 = mjEQ_JOINT)
+    const depJointIds = new Set<number>();
+    for (let i = 0; i < this.model.neq; i++) {
+      if (this.model.eq_type[i] === 2) {
+        const depJointId = this.model.eq_obj1id[i];
+        const srcJointId = this.model.eq_obj2id[i];
+        depJointIds.add(depJointId);
+
+        const depQposAdr = this.model.jnt_qposadr[depJointId];
+        const qpos0Dep = this.model.qpos0[depQposAdr];
+
+        let srcQposAdr = -1;
+        let qpos0Src = 0;
+        if (srcJointId !== -1) {
+          srcQposAdr = this.model.jnt_qposadr[srcJointId];
+          qpos0Src = this.model.qpos0[srcQposAdr];
+        }
+
+        const offset = i * 11;
+        const polycoef: [number, number, number, number, number] = [
+          this.model.eq_data[offset + 0],
+          this.model.eq_data[offset + 1],
+          this.model.eq_data[offset + 2],
+          this.model.eq_data[offset + 3],
+          this.model.eq_data[offset + 4],
+        ];
+
+        this.equalityConstraints.push({
+          id: i,
+          depJointId,
+          depQposAdr,
+          qpos0Dep,
+          srcJointId,
+          srcQposAdr,
+          qpos0Src,
+          polycoef,
+        });
+      }
+    }
+
+    // Classify joints: exclude free joint (type 0) and dependent joints (depJointIds)
+    for (let i = 0; i < this.model.njnt; i++) {
+      const name = this.model.jnt(i).name;
+      const type = this.model.jnt_type[i];
+      const qposadr = this.model.jnt_qposadr[i];
+      const min = this.model.jnt_range[i * 2];
+      const max = this.model.jnt_range[i * 2 + 1];
+      const range: [number, number] = [min, max];
+
+      this.jointMap.set(i, { id: i, name, qposadr, range });
+      this.jointMap.set(name, { id: i, name, qposadr, range });
+
+      // type 0 = mjJNT_FREE
+      if (type !== 0 && !depJointIds.has(i)) {
+        this.independentJoints.push({
+          id: i,
+          name,
+          qposadr,
+          range,
+          min,
+          max,
+          defaultValue: this.model.qpos0[qposadr],
+        });
+      }
+    }
 
     // Initialize to default pose qpos0 and forward simulation
     this.resetToDefaultPose();
@@ -141,11 +272,67 @@ export class MyoSimulation {
   }
 
   /**
-   * Resets simulation qpos to model default qpos0 and runs forward kinematics.
+   * Resets simulation qpos to model default qpos0, updates dependent joints, and runs forward kinematics.
    */
   resetToDefaultPose(): void {
     this.data.qpos.set(this.model.qpos0);
+    this.updateDependentJoints();
     this.mujoco.mj_forward(this.model, this.data);
+  }
+
+  /**
+   * Returns list of independent controllable joints (71 joints).
+   */
+  getIndependentJoints(): IndependentJointInfo[] {
+    return this.independentJoints.map((j) => ({ ...j }));
+  }
+
+  /**
+   * Recalculates all dependent joints based on their equality constraint polynomials.
+   */
+  updateDependentJoints(): void {
+    for (const c of this.equalityConstraints) {
+      if (c.srcJointId === -1) {
+        this.data.qpos[c.depQposAdr] = c.qpos0Dep + c.polycoef[0];
+      } else {
+        const qSrc = this.data.qpos[c.srcQposAdr];
+        const x = qSrc - c.qpos0Src;
+        this.data.qpos[c.depQposAdr] = c.qpos0Dep + evaluatePolynomial(c.polycoef, x);
+      }
+    }
+  }
+
+  /**
+   * Gets current joint angle by name or joint id.
+   */
+  getJointAngle(nameOrId: string | number): number {
+    const jnt = this.jointMap.get(nameOrId);
+    if (!jnt) {
+      throw new Error(`Joint "${nameOrId}" not found`);
+    }
+    return this.data.qpos[jnt.qposadr];
+  }
+
+  /**
+   * Sets joint angle with clamping to jnt_range, recalculates dependent joints, and runs forward kinematics.
+   * Returns the clamped angle.
+   */
+  setJointAngle(nameOrId: string | number, angle: number): number {
+    const jnt = this.jointMap.get(nameOrId);
+    if (!jnt) {
+      throw new Error(`Joint "${nameOrId}" not found`);
+    }
+
+    let clampedAngle = angle;
+    if (jnt.range && jnt.range[0] < jnt.range[1]) {
+      clampedAngle = Math.min(Math.max(angle, jnt.range[0]), jnt.range[1]);
+    }
+
+    this.data.qpos[jnt.qposadr] = clampedAngle;
+    this.updateDependentJoints();
+    this.mujoco.mj_forward(this.model, this.data);
+
+    return clampedAngle;
   }
 
   /**
