@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as THREE from "three";
 import { MuscleViewer } from "./MuscleViewer";
@@ -235,5 +235,135 @@ describe("MuscleViewer unmount cleanup", () => {
     unmount();
     expect(mockControlsDispose).not.toHaveBeenCalled();
     expect(mockRendererDispose).not.toHaveBeenCalled();
+  });
+
+  describe("STEP2: Joint sliders and pose interaction", () => {
+    it("追加テスト: MuscleViewer_slider_ui / 独立関節の部位別グループとスライダーが表示され、スライダー変更でsetJointAngleと姿勢・筋肉描画が連動する検証", async () => {
+      const mockSetJointAngle = vi
+        .fn()
+        .mockImplementation((_name: string, rad: number) => rad);
+      const mockGetSkeletonMeshes = vi.fn().mockReturnValue([]);
+      const mockGetMuscleTendonPaths = vi.fn().mockReturnValue([]);
+
+      const mockSim = {
+        loadTimeMs: 100,
+        applyForwardBendPose: vi.fn(),
+        resetToDefaultPose: vi.fn(),
+        getSkeletonMeshes: mockGetSkeletonMeshes,
+        getBaseActuatorLengths: vi.fn().mockReturnValue(new Float64Array([0.3])),
+        getCurrentActuatorLengths: vi.fn().mockReturnValue(new Float64Array([0.3])),
+        getMuscleTendonPaths: mockGetMuscleTendonPaths,
+        getIndependentJoints: vi.fn().mockReturnValue([
+          {
+            id: 1,
+            name: "knee_angle_r",
+            range: [0, 2.0944],
+            min: 0,
+            max: 2.0944,
+            defaultValue: 0,
+            group: "leg_r",
+          },
+          {
+            id: 2,
+            name: "flex_extension",
+            range: [-1.35, 0.75],
+            min: -1.35,
+            max: 0.75,
+            defaultValue: 0,
+            group: "torso",
+          },
+        ]),
+        getJointAngle: vi
+          .fn()
+          .mockImplementation((name: string) => (name === "knee_angle_r" ? 0 : 0)),
+        setJointAngle: mockSetJointAngle,
+        dispose: vi.fn(),
+      } as unknown as stretchModule.MyoSimulation;
+
+      vi.spyOn(stretchModule, "loadMyoSimulationFromFetch").mockResolvedValue(mockSim);
+
+      render(<MuscleViewer />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/関節コントロール|関節角度/)).toBeInTheDocument();
+      });
+
+      // 部位グループが表示されていること
+      expect(screen.getByText(/体幹/)).toBeInTheDocument();
+      expect(screen.getByText(/右脚/)).toBeInTheDocument();
+
+      // スライダーが存在すること
+      const kneeSlider = screen.getByLabelText(/knee_angle_r/i) as HTMLInputElement;
+      expect(kneeSlider).toBeInTheDocument();
+
+      // スライダーを動かす（例: 45度 -> 0.785 rad）
+      fireEvent.change(kneeSlider, { target: { value: "45" } });
+
+      // setJointAngle が呼ばれること
+      expect(mockSetJointAngle).toHaveBeenCalledWith(
+        "knee_angle_r",
+        expect.closeTo(0.785398, 3)
+      );
+      // 骨格と筋肉の更新が呼ばれること
+      expect(mockGetSkeletonMeshes).toHaveBeenCalled();
+      expect(mockGetMuscleTendonPaths).toHaveBeenCalled();
+    });
+
+    it("追加テスト: MuscleViewer_pose_buttons_sync_sliders / プリセット姿勢ボタン操作でスライダーの値が連動して更新される検証", async () => {
+      let currentKneeAngle = 0;
+      const mockSim = {
+        loadTimeMs: 100,
+        applyForwardBendPose: vi.fn().mockImplementation(() => {
+          currentKneeAngle = Math.PI / 2;
+        }),
+        resetToDefaultPose: vi.fn().mockImplementation(() => {
+          currentKneeAngle = 0;
+        }),
+        getSkeletonMeshes: vi.fn().mockReturnValue([]),
+        getBaseActuatorLengths: vi.fn().mockReturnValue(new Float64Array([0.3])),
+        getCurrentActuatorLengths: vi.fn().mockReturnValue(new Float64Array([0.3])),
+        getMuscleTendonPaths: vi.fn().mockReturnValue([]),
+        getIndependentJoints: vi.fn().mockReturnValue([
+          {
+            id: 1,
+            name: "hip_flexion_r",
+            range: [0, 2.0],
+            min: 0,
+            max: 2.0,
+            defaultValue: 0,
+            group: "leg_r",
+          },
+        ]),
+        getJointAngle: vi.fn().mockImplementation((name: string) => {
+          if (name === "hip_flexion_r") return currentKneeAngle;
+          return 0;
+        }),
+        setJointAngle: vi.fn(),
+        dispose: vi.fn(),
+      } as unknown as stretchModule.MyoSimulation;
+
+      vi.spyOn(stretchModule, "loadMyoSimulationFromFetch").mockResolvedValue(mockSim);
+
+      render(<MuscleViewer />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/hip_flexion_r/i)).toBeInTheDocument();
+      });
+
+      // 前屈ポーズボタンをクリック
+      currentKneeAngle = Math.PI / 2; // 90度
+      const forwardBendBtn = screen.getByRole("button", {
+        name: /前屈ポーズ/i,
+      });
+      fireEvent.click(forwardBendBtn);
+
+      expect(mockSim.applyForwardBendPose).toHaveBeenCalled();
+
+      // スライダーの表示またはvalueが90度に対応して更新されていること
+      await waitFor(() => {
+        const slider = screen.getByLabelText(/hip_flexion_r/i) as HTMLInputElement;
+        expect(Number(slider.value)).toBeCloseTo(90, 0);
+      });
+    });
   });
 });

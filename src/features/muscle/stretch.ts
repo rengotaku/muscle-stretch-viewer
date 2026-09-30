@@ -100,6 +100,67 @@ export interface MuscleTendonPath {
 }
 
 /**
+ * Body part groups for organizing independent joints.
+ */
+export type BodyPartGroupId =
+  | "torso"
+  | "leg_r"
+  | "leg_l"
+  | "arm_r"
+  | "hand_r"
+  | "arm_l"
+  | "hand_l";
+
+export interface BodyPartGroupDefinition {
+  id: BodyPartGroupId;
+  label: string;
+}
+
+export const BODY_PART_GROUPS: BodyPartGroupDefinition[] = [
+  { id: "torso", label: "体幹" },
+  { id: "leg_r", label: "右脚" },
+  { id: "leg_l", label: "左脚" },
+  { id: "arm_r", label: "右腕" },
+  { id: "hand_r", label: "右手指" },
+  { id: "arm_l", label: "左腕" },
+  { id: "hand_l", label: "左手指" },
+];
+
+/**
+ * Determines the body part group for a given joint name.
+ */
+export function getJointBodyGroup(name: string): BodyPartGroupId {
+  if (name === "flex_extension" || name === "lat_bending" || name === "axial_rotation") {
+    return "torso";
+  }
+  if (
+    name.startsWith("hip_") ||
+    name.startsWith("knee_angle_") ||
+    name.startsWith("ankle_angle_") ||
+    name.startsWith("subtalar_angle_") ||
+    name.startsWith("mtp_angle_")
+  ) {
+    return name.endsWith("_r") ? "leg_r" : "leg_l";
+  }
+  if (
+    name.startsWith("elv_angle_") ||
+    name.startsWith("shoulder_elv_") ||
+    name.startsWith("shoulder_rot_") ||
+    name.startsWith("elbow_flexion_") ||
+    name.startsWith("pro_sup_") ||
+    name.startsWith("deviation_") ||
+    name === "flexion_r" ||
+    name === "flexion_l"
+  ) {
+    return name.endsWith("_r") ? "arm_r" : "arm_l";
+  }
+  if (name.endsWith("_l")) {
+    return "hand_l";
+  }
+  return "hand_r";
+}
+
+/**
  * Information about an independent controllable joint.
  */
 export interface IndependentJointInfo {
@@ -110,6 +171,7 @@ export interface IndependentJointInfo {
   min: number;
   max: number;
   defaultValue: number;
+  group: BodyPartGroupId;
 }
 
 /**
@@ -259,6 +321,7 @@ export class MyoSimulation {
           min,
           max,
           defaultValue: this.model.qpos0[qposadr],
+          group: getJointBodyGroup(name),
         });
       }
     }

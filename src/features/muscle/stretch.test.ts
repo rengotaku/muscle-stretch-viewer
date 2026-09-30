@@ -375,5 +375,64 @@ describe("Muscle stretch ratio calculation and MyoFullBody simulation", () => {
       // qpos0_dep = 10, coef[0] = 1 -> 11
       expect(calculateDependentJointPosition(10, coef)).toBe(11);
     });
+
+    it("追加テスト: STEP2_joint_body_groups / 71個の独立関節が7つの部位グループ（体幹3、右脚7、左脚7、右腕7、右手指20、左腕7、左手指20）に完全分類される検証", async () => {
+      const { getJointBodyGroup, BODY_PART_GROUPS } = await import("./stretch");
+
+      expect(BODY_PART_GROUPS.length).toBe(7);
+      const joints = sim.getIndependentJoints();
+      expect(joints.length).toBe(71);
+
+      const counts: Record<string, number> = {
+        torso: 0,
+        leg_r: 0,
+        leg_l: 0,
+        arm_r: 0,
+        hand_r: 0,
+        arm_l: 0,
+        hand_l: 0,
+      };
+
+      for (const j of joints) {
+        const group = getJointBodyGroup(j.name);
+        expect(counts).toHaveProperty(group);
+        counts[group]++;
+        expect(j.group).toBe(group);
+      }
+
+      expect(counts.torso).toBe(3);
+      expect(counts.leg_r).toBe(7);
+      expect(counts.leg_l).toBe(7);
+      expect(counts.arm_r).toBe(7);
+      expect(counts.hand_r).toBe(20);
+      expect(counts.arm_l).toBe(7);
+      expect(counts.hand_l).toBe(20);
+    });
+
+    it("追加テスト: STEP2_setJointAngle_full_pipeline / setJointAngle呼び出し後に連動関節・筋長・伸び率が一貫して更新される検証", () => {
+      sim.resetToDefaultPose();
+
+      // 初期状態では全筋 1.0
+      const baseLengths = sim.getBaseActuatorLengths();
+      let ratios = calculateStretchRatios(baseLengths, sim.getCurrentActuatorLengths());
+      expect(ratios[sim.getActuatorId("vasint_r")]).toBeCloseTo(1.0, 5);
+
+      // 膝を 90度 (PI/2 rad) に曲げる
+      const angle90 = Math.PI / 2;
+      const clamped = sim.setJointAngle("knee_angle_r", angle90);
+      expect(clamped).toBeCloseTo(angle90, 6);
+
+      // 連動関節が自動で計算されていること
+      const trans2 = sim.getJointAngle("knee_angle_translation2_r");
+      expect(trans2).toBeGreaterThan(0);
+
+      // 伸び率が更新されていること
+      ratios = calculateStretchRatios(baseLengths, sim.getCurrentActuatorLengths());
+      expect(ratios[sim.getActuatorId("vasint_r")]).toBeGreaterThan(1.1);
+
+      // 骨格メッシュの変換行列も取得可能であること
+      const meshes = sim.getSkeletonMeshes();
+      expect(meshes.length).toBeGreaterThan(0);
+    });
   });
 });
