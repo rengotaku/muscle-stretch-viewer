@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
@@ -8,6 +8,9 @@ import {
   measurePoseComputationTime,
   logBenchmarkResults,
   type BenchmarkMetrics,
+  type IndependentJointInfo,
+  type BodyPartGroupId,
+  BODY_PART_GROUPS,
   MyoSimulation,
 } from "./stretch";
 
@@ -58,11 +61,24 @@ export const MuscleViewer: React.FC = () => {
     total: 71,
     message: "Initializing...",
   });
-  const [currentPose, setCurrentPose] = useState<"forward_bend" | "default">(
+  const [currentPose, setCurrentPose] = useState<"forward_bend" | "default" | "custom">(
     "forward_bend"
   );
   const [selectedMuscles, setSelectedMuscles] = useState<MuscleInfo[]>([]);
   const [benchmark, setBenchmark] = useState<BenchmarkMetrics | null>(null);
+
+  // Independent joints list & angle states (stored in radians)
+  const [joints, setJoints] = useState<IndependentJointInfo[]>([]);
+  const [jointAngles, setJointAngles] = useState<Record<string, number>>({});
+  const [openGroups, setOpenGroups] = useState<Record<BodyPartGroupId, boolean>>({
+    torso: true,
+    leg_r: true,
+    leg_l: true,
+    arm_r: false,
+    hand_r: false,
+    arm_l: false,
+    hand_l: false,
+  });
 
   // Measure pose computation time (single and 100 runs average) and log to console.info
   const runBenchmark = useCallback(() => {
@@ -78,6 +94,40 @@ export const MuscleViewer: React.FC = () => {
     };
     setBenchmark(metrics);
     logBenchmarkResults(metrics);
+  }, []);
+
+  // Update bone mesh matrices
+  const updateSkeletonMeshes = useCallback((sim: MyoSimulation) => {
+    if (!sceneRef.current) return;
+    const boneGroup = sceneRef.current.getObjectByName("boneGroup");
+    if (!boneGroup) return;
+
+    const skeletonMeshes = sim.getSkeletonMeshes();
+    skeletonMeshes.forEach((meshData, idx) => {
+      const meshObj = boneGroup.children[idx];
+      if (meshObj instanceof THREE.Mesh) {
+        const m = new THREE.Matrix4();
+        m.set(
+          meshData.transform[0],
+          meshData.transform[1],
+          meshData.transform[2],
+          meshData.transform[3],
+          meshData.transform[4],
+          meshData.transform[5],
+          meshData.transform[6],
+          meshData.transform[7],
+          meshData.transform[8],
+          meshData.transform[9],
+          meshData.transform[10],
+          meshData.transform[11],
+          meshData.transform[12],
+          meshData.transform[13],
+          meshData.transform[14],
+          meshData.transform[15]
+        );
+        meshObj.matrix.copy(m);
+      }
+    });
   }, []);
 
   // Build muscle geometries and materials inside Three.js group
@@ -109,6 +159,7 @@ export const MuscleViewer: React.FC = () => {
       { name: "semiten_r", label: "半腱様筋 (ハムストリングス)" },
       { name: "bfsh_r", label: "大腿二頭筋 短頭 (膝単関節筋)" },
       { name: "recfem_r", label: "大腿直筋 (大腿四頭筋)" },
+      { name: "vasint_r", label: "中間広筋 (大腿四頭筋・膝伸筋)" },
     ];
 
     const muscleInfos: MuscleInfo[] = [];
@@ -126,7 +177,7 @@ export const MuscleViewer: React.FC = () => {
         curvePath.add(new THREE.LineCurve3(p1, p2));
       }
 
-      // 3mm radius tube for muscle path
+      // 3.5mm radius tube for muscle path
       const tubeGeom = new THREE.TubeGeometry(
         curvePath,
         (path.points.length - 1) * 3,
@@ -159,7 +210,28 @@ export const MuscleViewer: React.FC = () => {
     setSelectedMuscles(muscleInfos);
   }, []);
 
-  // Switch poses
+  // Synchronize joint angles state from current simulation state
+  const syncAnglesFromSim = useCallback(
+    (sim: MyoSimulation, availableJoints?: IndependentJointInfo[]) => {
+      const targetJoints =
+        availableJoints && availableJoints.length > 0
+          ? availableJoints
+          : typeof sim.getIndependentJoints === "function"
+            ? sim.getIndependentJoints()
+            : [];
+      const newAngles: Record<string, number> = {};
+      for (const j of targetJoints) {
+        newAngles[j.name] =
+          typeof sim.getJointAngle === "function"
+            ? sim.getJointAngle(j.name)
+            : j.defaultValue;
+      }
+      setJointAngles(newAngles);
+    },
+    []
+  );
+
+  // Switch poses (preset buttons)
   const handlePoseChange = useCallback(
     (pose: "forward_bend" | "default") => {
       const sim = simRef.current;
@@ -171,44 +243,76 @@ export const MuscleViewer: React.FC = () => {
         sim.resetToDefaultPose();
       }
 
-      // Update bone meshes
-      if (sceneRef.current) {
-        const boneGroup = sceneRef.current.getObjectByName("boneGroup");
-        if (boneGroup) {
-          const skeletonMeshes = sim.getSkeletonMeshes();
-          skeletonMeshes.forEach((meshData, idx) => {
-            const meshObj = boneGroup.children[idx];
-            if (meshObj instanceof THREE.Mesh) {
-              const m = new THREE.Matrix4();
-              m.set(
-                meshData.transform[0],
-                meshData.transform[1],
-                meshData.transform[2],
-                meshData.transform[3],
-                meshData.transform[4],
-                meshData.transform[5],
-                meshData.transform[6],
-                meshData.transform[7],
-                meshData.transform[8],
-                meshData.transform[9],
-                meshData.transform[10],
-                meshData.transform[11],
-                meshData.transform[12],
-                meshData.transform[13],
-                meshData.transform[14],
-                meshData.transform[15]
-              );
-              meshObj.matrix.copy(m);
-            }
-          });
-        }
-      }
-
+      updateSkeletonMeshes(sim);
       updateMuscleMeshes(sim);
+      syncAnglesFromSim(sim);
       setCurrentPose(pose);
     },
-    [updateMuscleMeshes]
+    [syncAnglesFromSim, updateMuscleMeshes, updateSkeletonMeshes]
   );
+
+  // Handle slider change: setJointAngle (calculates dependent joints) -> update skeleton -> update muscles
+  const handleSliderChange = useCallback(
+    (jointName: string, degValue: number) => {
+      const sim = simRef.current;
+      if (!sim) return;
+
+      const radValue = (degValue * Math.PI) / 180;
+      const clampedRad =
+        typeof sim.setJointAngle === "function"
+          ? sim.setJointAngle(jointName, radValue)
+          : radValue;
+
+      setJointAngles((prev) => ({ ...prev, [jointName]: clampedRad }));
+      updateSkeletonMeshes(sim);
+      updateMuscleMeshes(sim);
+      setCurrentPose("custom");
+    },
+    [updateMuscleMeshes, updateSkeletonMeshes]
+  );
+
+  // Group joints by body part
+  const groupedJoints = useMemo(() => {
+    const map = new Map<BodyPartGroupId, IndependentJointInfo[]>();
+    for (const g of BODY_PART_GROUPS) {
+      map.set(g.id, []);
+    }
+    for (const j of joints) {
+      const list = map.get(j.group);
+      if (list) {
+        list.push(j);
+      }
+    }
+    return map;
+  }, [joints]);
+
+  const toggleGroup = useCallback((groupId: BodyPartGroupId) => {
+    setOpenGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
+  }, []);
+
+  const expandAllGroups = useCallback(() => {
+    setOpenGroups({
+      torso: true,
+      leg_r: true,
+      leg_l: true,
+      arm_r: true,
+      hand_r: true,
+      arm_l: true,
+      hand_l: true,
+    });
+  }, []);
+
+  const collapseAllGroups = useCallback(() => {
+    setOpenGroups({
+      torso: false,
+      leg_r: false,
+      leg_l: false,
+      arm_r: false,
+      hand_r: false,
+      arm_l: false,
+      hand_l: false,
+    });
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -349,6 +453,14 @@ export const MuscleViewer: React.FC = () => {
         // Build muscles
         updateMuscleMeshes(sim);
 
+        // Populate independent joints and sync angles
+        const independentJoints =
+          typeof sim.getIndependentJoints === "function"
+            ? sim.getIndependentJoints()
+            : [];
+        setJoints(independentJoints);
+        syncAnglesFromSim(sim, independentJoints);
+
         // Measure pose computation time (single and 100 runs average) and log to console.info
         const res = measurePoseComputationTime(sim, 100);
         const metrics: BenchmarkMetrics = {
@@ -429,176 +541,301 @@ export const MuscleViewer: React.FC = () => {
         simRef.current = null;
       }
     };
-  }, [supported, updateMuscleMeshes]);
+  }, [supported, syncAnglesFromSim, updateMuscleMeshes]);
 
   return (
-    <div className="relative flex flex-col w-full h-[700px] bg-slate-950 rounded-xl overflow-hidden shadow-2xl border border-slate-800">
-      {/* 3D Viewport container */}
-      <div
-        ref={containerRef}
-        className="w-full h-full cursor-grab active:cursor-grabbing"
-      />
+    <div className="flex flex-col xl:flex-row w-full gap-4 items-stretch">
+      {/* Left column: pose bar / 3D viewport / readouts */}
+      <div className="flex flex-col flex-1 min-w-0 gap-3">
+        {/* Pose bar (outside the canvas so it never covers the skeleton) */}
+        <div className="flex flex-wrap gap-2 items-center bg-slate-900 p-2 rounded-lg border border-slate-800">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2">
+            ポーズ:
+          </span>
+          <button
+            type="button"
+            onClick={() => handlePoseChange("forward_bend")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              currentPose === "forward_bend"
+                ? "bg-primary text-primary-foreground shadow"
+                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            前屈ポーズ (股関節 90° 屈曲)
+          </button>
+          <button
+            type="button"
+            onClick={() => handlePoseChange("default")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              currentPose === "default"
+                ? "bg-primary text-primary-foreground shadow"
+                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            基準姿勢 (立位 qpos0)
+          </button>
+        </div>
 
-      {/* Loading overlay */}
-      {loading && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/85 backdrop-blur-sm">
-          <div className="size-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
-          <p className="text-slate-200 font-medium text-lg mb-2">
-            MyoFullBody 筋骨格モデルを読み込み中...
-          </p>
-          <p className="text-slate-400 text-sm mb-4">{loadingStatus.message}</p>
-          <div className="w-64 h-2 bg-slate-800 rounded-full overflow-hidden">
+        {/* 3D Viewport container */}
+        <div className="relative h-[520px] xl:h-[640px] w-full bg-slate-950 rounded-xl overflow-hidden shadow-2xl border border-slate-800">
+          <div
+            ref={containerRef}
+            className="w-full h-full cursor-grab active:cursor-grabbing"
+          />
+
+          {/* Loading overlay */}
+          {loading && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/85 backdrop-blur-sm">
+              <div className="size-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
+              <p className="text-slate-200 font-medium text-lg mb-2">
+                MyoFullBody 筋骨格モデルを読み込み中...
+              </p>
+              <p className="text-slate-400 text-sm mb-4">{loadingStatus.message}</p>
+              <div className="w-64 h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-200"
+                  style={{
+                    width: `${Math.round((loadingStatus.loaded / (loadingStatus.total || 1)) * 100)}%`,
+                  }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 mt-2">
+                {loadingStatus.loaded} / {loadingStatus.total} files
+              </span>
+            </div>
+          )}
+
+          {/* Error state */}
+          {loadError && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/90 p-6 text-center">
+              <div className="text-red-400 font-bold text-lg mb-2">
+                モデル読み込みエラー
+              </div>
+              <p className="text-slate-400 text-sm max-w-md">{loadError}</p>
+            </div>
+          )}
+
+          {/* Color Legend (Top right, compact) */}
+          <div className="absolute top-3 right-3 z-20 w-56 bg-slate-900/80 backdrop-blur-md px-3 py-2.5 rounded-lg border border-slate-800 text-slate-200 text-xs shadow-lg">
+            <div className="font-semibold text-slate-100 mb-1.5">
+              伸び率の凡例 (Color Legend)
+            </div>
+            {/* 5 つの停止点は getStretchColorHex の 0.8 / 0.9 / 1.0 / 1.1 / 1.2 と一致させる（Tailwind の via-* は重ねると上書きされ 1 点しか効かない） */}
             <div
-              className="h-full bg-primary transition-all duration-200"
+              className="w-full h-2.5 rounded-full mb-1"
               style={{
-                width: `${Math.round((loadingStatus.loaded / (loadingStatus.total || 1)) * 100)}%`,
+                background:
+                  "linear-gradient(to right, #1e3a8a 0%, #38bdf8 25%, #f0f0f0 50%, #facc15 75%, #ef4444 100%)",
               }}
             />
+            <div className="flex justify-between text-[10px] text-slate-400 mb-1.5 font-mono">
+              <span>≤ 0.8</span>
+              <span>0.9</span>
+              <span>1.0</span>
+              <span>1.1</span>
+              <span>≥ 1.2</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1 text-[10px] pt-1.5 border-t border-slate-700/70 text-center">
+              <div className="text-sky-400 font-medium">縮小 (寒色)</div>
+              <div className="text-slate-300 font-medium">中立 (白)</div>
+              <div className="text-rose-400 font-medium">伸張 (暖色)</div>
+            </div>
           </div>
-          <span className="text-xs text-slate-500 mt-2">
-            {loadingStatus.loaded} / {loadingStatus.total} files
-          </span>
-        </div>
-      )}
 
-      {/* Error state */}
-      {loadError && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/90 p-6 text-center">
-          <div className="text-red-400 font-bold text-lg mb-2">モデル読み込みエラー</div>
-          <p className="text-slate-400 text-sm max-w-md">{loadError}</p>
+          {/* Navigation hint (Bottom center) */}
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 text-[10px] text-slate-400 bg-slate-900/70 px-2.5 py-1 rounded backdrop-blur-sm pointer-events-none border border-slate-800/50 whitespace-nowrap">
+            ドラッグ: 回転 | 右ドラッグ: 平行移動 | ホイール: ズーム
+          </div>
         </div>
-      )}
 
-      {/* Control bar (Top left) */}
-      <div className="absolute top-4 left-4 z-20 flex flex-wrap gap-2 items-center bg-slate-900/80 backdrop-blur-md p-2 rounded-lg border border-slate-800">
-        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2">
-          ポーズ:
-        </span>
-        <button
-          type="button"
-          onClick={() => handlePoseChange("forward_bend")}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-            currentPose === "forward_bend"
-              ? "bg-primary text-primary-foreground shadow"
-              : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-          }`}
-        >
-          前屈ポーズ (股関節 90° 屈曲)
-        </button>
-        <button
-          type="button"
-          onClick={() => handlePoseChange("default")}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-            currentPose === "default"
-              ? "bg-primary text-primary-foreground shadow"
-              : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-          }`}
-        >
-          基準姿勢 (立位 qpos0)
-        </button>
-      </div>
+        {/* Readouts below the 3D view */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+          {/* Muscle stretch details panel */}
+          <div className="lg:col-span-3 bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-xs">
+            <div className="font-semibold text-slate-200 mb-2 flex items-center gap-1.5 text-sm">
+              <span className="inline-block size-2 rounded-full bg-rose-500 animate-pulse" />
+              <span>代表筋肉の実測伸び率</span>
+            </div>
+            <div className="grid grid-cols-1 gap-y-1">
+              {selectedMuscles.map((m) => (
+                <div
+                  key={m.name}
+                  className="flex items-center justify-between gap-3 py-1 border-b border-slate-800/70"
+                >
+                  <span className="text-slate-300 truncate" title={m.label}>
+                    {m.label}
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span
+                      className="size-2.5 rounded-full inline-block"
+                      style={{ backgroundColor: m.color }}
+                    />
+                    <span className="font-mono font-medium text-slate-100 tabular-nums w-16 text-right">
+                      {m.ratio.toFixed(3)}x
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-[10px] text-slate-400">
+              伸び率 = 今の筋長 ÷ 基準姿勢（立位）での筋長。1.0 より大きいと伸びている
+            </div>
+          </div>
 
-      {/* Color Legend (Top right) */}
-      <div className="absolute top-4 right-4 z-20 bg-slate-900/85 backdrop-blur-md p-3.5 rounded-lg border border-slate-800 text-slate-200 text-xs shadow-lg max-w-xs">
-        <div className="font-semibold text-slate-100 mb-2 flex items-center justify-between">
-          <span>伸び率の凡例 (Color Legend)</span>
-        </div>
-        {/* 5 つの停止点は getStretchColorHex の 0.8 / 0.9 / 1.0 / 1.1 / 1.2 と一致させる（Tailwind の via-* は重ねると上書きされ 1 点しか効かない） */}
-        <div
-          className="w-full h-3 rounded-full mb-1.5"
-          style={{
-            background:
-              "linear-gradient(to right, #1e3a8a 0%, #38bdf8 25%, #f0f0f0 50%, #facc15 75%, #ef4444 100%)",
-          }}
-        />
-        <div className="flex justify-between text-[10px] text-slate-400 mb-2 font-mono">
-          <span>≤ 0.8</span>
-          <span>0.9</span>
-          <span>1.0</span>
-          <span>1.1</span>
-          <span>≥ 1.2</span>
-        </div>
-        <div className="grid grid-cols-3 gap-1 text-[11px] pt-1 border-t border-slate-800 text-center">
-          <div className="text-sky-400 font-medium">縮小 (寒色)</div>
-          <div className="text-slate-300 font-medium">中立 (白)</div>
-          <div className="text-rose-400 font-medium">伸張 (暖色)</div>
-        </div>
-      </div>
-
-      {/* Muscle stretch details panel (Bottom left) */}
-      <div className="absolute bottom-4 left-4 z-20 bg-slate-900/85 backdrop-blur-md p-3 rounded-lg border border-slate-800 text-xs shadow-lg max-w-sm">
-        <div className="font-semibold text-slate-200 mb-2 flex items-center gap-1.5">
-          <span className="inline-block size-2 rounded-full bg-rose-500 animate-pulse" />
-          <span>代表筋肉の実測伸び率</span>
-        </div>
-        <div className="space-y-1.5">
-          {selectedMuscles.map((m) => (
-            <div key={m.name} className="flex items-center justify-between gap-4 py-0.5">
-              <span className="text-slate-300 truncate">{m.label}</span>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span
-                  className="size-2.5 rounded-full inline-block"
-                  style={{ backgroundColor: m.color }}
-                />
-                <span className="font-mono font-medium text-slate-100">
-                  {m.ratio.toFixed(3)}x
+          {/* Performance Benchmark panel */}
+          {benchmark && (
+            <div className="lg:col-span-2 bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-xs">
+              <div className="font-semibold text-slate-200 mb-2 flex items-center justify-between gap-2 text-sm">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block size-2 rounded-full bg-emerald-400" />
+                  <span>パフォーマンス実測 (performance.now)</span>
                 </span>
+                <button
+                  type="button"
+                  onClick={runBenchmark}
+                  className="shrink-0 text-[11px] text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded transition-colors"
+                >
+                  再計測
+                </button>
+              </div>
+              <div className="font-mono text-[11px]">
+                <div className="flex justify-between gap-2 py-1 border-b border-slate-800/80">
+                  <span className="text-slate-400 font-sans">(a) 読み込み時間:</span>
+                  <span className="text-emerald-400 font-bold tabular-nums">
+                    {benchmark.loadTimeMs.toFixed(1)} ms
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2 py-1 border-b border-slate-800/80">
+                  <span className="text-slate-400 font-sans">(b) ポーズ計算 (単発):</span>
+                  <span className="text-amber-400 font-bold tabular-nums">
+                    {benchmark.singlePoseMs.toFixed(3)} ms
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2 py-1">
+                  <span className="text-slate-400 font-sans">
+                    (b) ポーズ計算 (100回平均):
+                  </span>
+                  <span className="text-amber-400 font-bold tabular-nums">
+                    {benchmark.avgPoseMs.toFixed(3)} ms
+                  </span>
+                </div>
+              </div>
+              <div className="mt-1.5 text-[10px] text-slate-500 leading-tight">
+                ※ qpos 設定 → mj_forward → 416 筋伸び率（描画除外）
               </div>
             </div>
-          ))}
-        </div>
-        <div className="mt-2 text-[10px] text-slate-400 pt-1.5 border-t border-slate-800">
-          ※ 太もも裏のハムストリングス（bflh_r 等）が赤く伸張（&gt; 1.1x）
+          )}
         </div>
       </div>
 
-      {/* Performance Benchmark panel (Bottom right) */}
-      {benchmark && (
-        <div className="absolute bottom-4 right-4 z-20 bg-slate-900/90 backdrop-blur-md p-3 rounded-lg border border-slate-800 text-xs shadow-lg w-72">
-          <div className="font-semibold text-slate-200 mb-1.5 flex items-center justify-between">
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block size-2 rounded-full bg-emerald-400" />
-              <span>パフォーマンス実測 (performance.now)</span>
-            </span>
-            <button
-              type="button"
-              onClick={runBenchmark}
-              className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 px-1.5 py-0.5 rounded transition-colors"
-            >
-              再計測
-            </button>
-          </div>
-          <div className="space-y-1 font-mono text-[11px]">
-            <div className="flex justify-between gap-2 py-0.5 border-b border-slate-800/80">
-              <span className="text-slate-400 font-sans">(a) 読み込み時間:</span>
-              <span className="text-emerald-400 font-bold">
-                {benchmark.loadTimeMs.toFixed(1)} ms
-              </span>
+      {/* 71 Joint Sliders Panel: on xl it matches the left column height and scrolls inside */}
+      <div className="relative w-full xl:w-96 xl:shrink-0">
+        <div className="flex flex-col max-h-[640px] xl:max-h-none xl:absolute xl:inset-0 bg-slate-900/95 rounded-xl border border-slate-800 p-4 shadow-xl overflow-hidden">
+          <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                <span className="inline-block size-2 rounded-full bg-primary" />
+                関節角度コントロール
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                独立関節 {joints.length || 71} 個（可動域に従って連動計算）
+              </p>
             </div>
-            <div className="flex justify-between gap-2 py-0.5">
-              <span className="text-slate-400 font-sans">(b) ポーズ計算 (単発):</span>
-              <span className="text-amber-400 font-bold">
-                {benchmark.singlePoseMs.toFixed(3)} ms
-              </span>
-            </div>
-            <div className="flex justify-between gap-2 py-0.5">
-              <span className="text-slate-400 font-sans">
-                (b) ポーズ計算 (100回平均):
-              </span>
-              <span className="text-amber-400 font-bold">
-                {benchmark.avgPoseMs.toFixed(3)} ms
-              </span>
+            <div className="flex gap-1.5 text-[11px] shrink-0">
+              <button
+                type="button"
+                onClick={expandAllGroups}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+              >
+                全開
+              </button>
+              <button
+                type="button"
+                onClick={collapseAllGroups}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+              >
+                全閉
+              </button>
             </div>
           </div>
-          <div className="mt-1.5 text-[9px] text-slate-500 pt-1 border-t border-slate-800 leading-tight">
-            ※ qpos 設定 → mj_forward → 416 筋伸び率（描画除外）
+
+          {/* Group list with scroll */}
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2 mt-3 pr-1">
+            {BODY_PART_GROUPS.map((group) => {
+              const list = groupedJoints.get(group.id) ?? [];
+              if (list.length === 0) return null;
+              const isOpen = openGroups[group.id];
+
+              return (
+                <div
+                  key={group.id}
+                  className="border border-slate-800/90 rounded-lg overflow-hidden bg-slate-950/40"
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-semibold text-slate-100 bg-slate-800/40 hover:bg-slate-800/80 transition-colors text-left"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>{group.label}</span>
+                      <span className="text-[11px] text-slate-500 font-mono font-normal">
+                        ({list.length})
+                      </span>
+                    </span>
+                    <span className="text-slate-500 text-[10px]">
+                      {isOpen ? "▲" : "▼"}
+                    </span>
+                  </button>
+
+                  {isOpen && (
+                    <div className="px-3 py-3 space-y-3.5 border-t border-slate-800/50">
+                      {list.map((joint) => {
+                        const curRad = jointAngles[joint.name] ?? joint.defaultValue;
+                        const curDeg = (curRad * 180) / Math.PI;
+                        const minDeg = (joint.min * 180) / Math.PI;
+                        const maxDeg = (joint.max * 180) / Math.PI;
+
+                        return (
+                          <div key={joint.id} className="space-y-1">
+                            <div className="flex justify-between items-baseline gap-2">
+                              <label
+                                htmlFor={`slider-${joint.name}`}
+                                className="flex-1 min-w-0 text-slate-300 font-mono text-xs truncate"
+                                title={joint.name}
+                              >
+                                {joint.name}
+                              </label>
+                              <span className="w-16 shrink-0 text-right tabular-nums font-mono text-emerald-400 font-semibold text-xs">
+                                {curDeg.toFixed(1)}°
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              id={`slider-${joint.name}`}
+                              aria-label={joint.name}
+                              min={minDeg.toFixed(1)}
+                              max={maxDeg.toFixed(1)}
+                              step={0.5}
+                              value={curDeg.toFixed(1)}
+                              onChange={(e) =>
+                                handleSliderChange(joint.name, parseFloat(e.target.value))
+                              }
+                              className="w-full accent-primary h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                            />
+                            <div className="flex justify-between text-[10px] text-slate-500 font-mono tabular-nums">
+                              <span>{minDeg.toFixed(0)}°</span>
+                              <span>{maxDeg.toFixed(0)}°</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
-      )}
-
-      {/* Navigation hint (Bottom center) */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 text-[10px] text-slate-500 bg-slate-900/80 px-2.5 py-1 rounded backdrop-blur-sm pointer-events-none border border-slate-800/50">
-        ドラッグ: 回転 | 右ドラッグ: 平行移動 | ホイール: ズーム
       </div>
     </div>
   );

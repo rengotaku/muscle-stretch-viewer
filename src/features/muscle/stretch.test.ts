@@ -200,4 +200,276 @@ describe("Muscle stretch ratio calculation and MyoFullBody simulation", () => {
       expect(invalidColor).toBe("#94a3b8");
     });
   });
+
+  // --- STEP1: U1 - U4 ---
+  describe("STEP1: U1 - U4: Independent joints, dependent joint polynomial calculation, and clamping", () => {
+    let sim: MyoSimulation;
+
+    beforeAll(async () => {
+      const modelDir = path.resolve(process.cwd(), "public/models/myo");
+      sim = await loadMyoSimulationFromFs(modelDir);
+    });
+
+    afterAll(() => {
+      if (sim) {
+        sim.dispose();
+      }
+    });
+
+    it("U1: 基準姿勢から独立関節の一覧を取ると71個であり、free jointと連動関節51個を含まず各最小・最大がjnt_rangeと一致する", () => {
+      sim.resetToDefaultPose();
+      const joints = sim.getIndependentJoints();
+
+      expect(joints.length).toBe(71);
+
+      // free joint (root) を含まない
+      expect(joints.some((j) => j.name === "root")).toBe(false);
+
+      // 連動関節（equality制約51個のobj1）を含まない
+      const depJointIds = new Set<number>();
+      for (let i = 0; i < sim.model.neq; i++) {
+        if (sim.model.eq_type[i] === 2) {
+          depJointIds.add(sim.model.eq_obj1id[i]);
+        }
+      }
+      expect(depJointIds.size).toBe(51);
+
+      for (const joint of joints) {
+        expect(depJointIds.has(joint.id)).toBe(false);
+        const expectedMin = sim.model.jnt_range[joint.id * 2];
+        const expectedMax = sim.model.jnt_range[joint.id * 2 + 1];
+        expect(joint.range[0]).toBe(expectedMin);
+        expect(joint.range[1]).toBe(expectedMax);
+        expect(joint.min).toBe(expectedMin);
+        expect(joint.max).toBe(expectedMax);
+      }
+    });
+
+    it("U2: 基準姿勢から knee_angle_r を 90° にすると連動関節 knee_angle_translation2_r が多項式の計算値と一致（許容誤差 1e-9）", () => {
+      sim.resetToDefaultPose();
+      const angle90 = (90 * Math.PI) / 180;
+      sim.setJointAngle("knee_angle_r", angle90);
+
+      // 多項式係数: knee_angle_translation2_constraint_r
+      const kneeR = sim.model.jnt("knee_angle_r");
+      const trans2R = sim.model.jnt("knee_angle_translation2_r");
+
+      // 該当の equality constraint を探索
+      let eqIndex = -1;
+      for (let i = 0; i < sim.model.neq; i++) {
+        if (
+          sim.model.eq_type[i] === 2 &&
+          sim.model.eq_obj1id[i] === trans2R.id &&
+          sim.model.eq_obj2id[i] === kneeR.id
+        ) {
+          eqIndex = i;
+          break;
+        }
+      }
+      expect(eqIndex).toBeGreaterThanOrEqual(0);
+
+      const qpos0_dep = sim.model.qpos0[trans2R.qposadr];
+      const qpos0_src = sim.model.qpos0[kneeR.qposadr];
+      const x = angle90 - qpos0_src;
+      const c0 = sim.model.eq_data[eqIndex * 11 + 0];
+      const c1 = sim.model.eq_data[eqIndex * 11 + 1];
+      const c2 = sim.model.eq_data[eqIndex * 11 + 2];
+      const c3 = sim.model.eq_data[eqIndex * 11 + 3];
+      const c4 = sim.model.eq_data[eqIndex * 11 + 4];
+      const expected =
+        qpos0_dep + c0 + c1 * x + c2 * x * x + c3 * x * x * x + c4 * x * x * x * x;
+
+      const actual = sim.getJointAngle("knee_angle_translation2_r");
+      expect(actual).toBeCloseTo(expected, 9);
+      expect(Math.abs(actual - expected)).toBeLessThanOrEqual(1e-9);
+    });
+
+    it("U3: U2と同じ姿勢で伸び率を計算すると vasint_r > 1.1、bfsh_r < 0.8、bfsh_l は 1.0（許容誤差 1e-6）", () => {
+      sim.resetToDefaultPose();
+      const angle90 = (90 * Math.PI) / 180;
+      sim.setJointAngle("knee_angle_r", angle90);
+
+      const baseLengths = sim.getBaseActuatorLengths();
+      const currentLengths = sim.getCurrentActuatorLengths();
+      const ratios = calculateStretchRatios(baseLengths, currentLengths);
+
+      const vasintRId = sim.getActuatorId("vasint_r");
+      const bfshRId = sim.getActuatorId("bfsh_r");
+      const bfshLId = sim.getActuatorId("bfsh_l");
+
+      // 中間広筋 vasint_r が 1.1 より大きい（実測 1.152）
+      expect(ratios[vasintRId]).toBeGreaterThan(1.1);
+      // 大腿二頭筋短頭 bfsh_r が 0.8 未満（実測 0.730）
+      expect(ratios[bfshRId]).toBeLessThan(0.8);
+      // 反対側 bfsh_l は 1.0（許容誤差 1e-6）
+      expect(ratios[bfshLId]).toBeCloseTo(1.0, 6);
+    });
+
+    it("U4: 基準姿勢で可動域外の値（jnt_range の最大 + 1 rad）を入れると最大値にクランプされる", () => {
+      sim.resetToDefaultPose();
+      const knee = sim.getIndependentJoints().find((j) => j.name === "knee_angle_r")!;
+      const overMax = knee.range[1] + 1.0;
+
+      const clamped = sim.setJointAngle("knee_angle_r", overMax);
+      expect(clamped).toBe(knee.range[1]);
+      expect(sim.getJointAngle("knee_angle_r")).toBe(knee.range[1]);
+    });
+
+    it("追加テスト: U4_clamp_min / 可動域下限外の値（jnt_range の最小 - 1 rad）を入れると最小値にクランプされる境界値の検証", () => {
+      sim.resetToDefaultPose();
+      const knee = sim.getIndependentJoints().find((j) => j.name === "knee_angle_r")!;
+      const underMin = knee.range[0] - 1.0;
+
+      const clamped = sim.setJointAngle("knee_angle_r", underMin);
+      expect(clamped).toBe(knee.range[0]);
+      expect(sim.getJointAngle("knee_angle_r")).toBe(knee.range[0]);
+    });
+
+    it("追加テスト: U2_unsupported_joint_or_locked / 相手のない制約（Abs_t1, Abs_t2等）が qpos0 + c0 に固定されることの検証", () => {
+      sim.resetToDefaultPose();
+      // knee_angle_r を動かしても Abs_t1, Abs_t2 は変化しない
+      sim.setJointAngle("knee_angle_r", 1.0);
+
+      const t1 = sim.getJointAngle("Abs_t1");
+      const t2 = sim.getJointAngle("Abs_t2");
+      const expectedT1 = sim.model.qpos0[sim.model.jnt("Abs_t1").qposadr];
+      const expectedT2 = sim.model.qpos0[sim.model.jnt("Abs_t2").qposadr];
+
+      expect(t1).toBeCloseTo(expectedT1, 9);
+      expect(t2).toBeCloseTo(expectedT2, 9);
+    });
+
+    it("追加テスト: U1_total_joint_count_and_types / 全123関節の内訳（free 1 + 連動 51 + 独立 71 = 123）の不変条件検証", () => {
+      expect(sim.model.njnt).toBe(123);
+      const independentJoints = sim.getIndependentJoints();
+      expect(independentJoints.length).toBe(71);
+
+      let freeCount = 0;
+      for (let i = 0; i < sim.model.njnt; i++) {
+        if (sim.model.jnt_type[i] === 0) {
+          freeCount++;
+        }
+      }
+      expect(freeCount).toBe(1);
+      expect(sim.model.neq).toBe(51);
+      expect(freeCount + sim.model.neq + independentJoints.length).toBe(123);
+    });
+
+    it("追加テスト: evaluatePolynomial_calculation / 多項式評価ヘルパー関数の単体検証", async () => {
+      const { evaluatePolynomial, calculateDependentJointPosition } =
+        await import("./stretch");
+
+      // c0 + c1*x + c2*x^2 + c3*x^3 + c4*x^4
+      const coef = [1, 2, 3, 4, 5];
+      // x = 2 -> 1 + 2(2) + 3(4) + 4(8) + 5(16) = 1 + 4 + 12 + 32 + 80 = 129
+      expect(evaluatePolynomial(coef, 2)).toBe(129);
+
+      // x = 0 -> 1
+      expect(evaluatePolynomial(coef, 0)).toBe(1);
+
+      // calculateDependentJointPosition with src
+      // qpos0_dep = 10, qpos0_src = 1, q_src = 3 -> x = 2 -> 10 + 129 = 139
+      expect(calculateDependentJointPosition(10, coef, 3, 1)).toBe(139);
+
+      // calculateDependentJointPosition without src (locked joint)
+      // qpos0_dep = 10, coef[0] = 1 -> 11
+      expect(calculateDependentJointPosition(10, coef)).toBe(11);
+    });
+
+    it("追加テスト: STEP2_joint_body_groups / 71個の独立関節が7つの部位グループ（体幹3、右脚7、左脚7、右腕7、右手指20、左腕7、左手指20）に完全分類される検証", async () => {
+      const { getJointBodyGroup, BODY_PART_GROUPS } = await import("./stretch");
+
+      expect(BODY_PART_GROUPS.length).toBe(7);
+      const joints = sim.getIndependentJoints();
+      expect(joints.length).toBe(71);
+
+      const counts: Record<string, number> = {
+        torso: 0,
+        leg_r: 0,
+        leg_l: 0,
+        arm_r: 0,
+        hand_r: 0,
+        arm_l: 0,
+        hand_l: 0,
+      };
+
+      for (const j of joints) {
+        const group = getJointBodyGroup(j.name);
+        expect(counts).toHaveProperty(group);
+        counts[group]++;
+        expect(j.group).toBe(group);
+      }
+
+      expect(counts.torso).toBe(3);
+      expect(counts.leg_r).toBe(7);
+      expect(counts.leg_l).toBe(7);
+      expect(counts.arm_r).toBe(7);
+      expect(counts.hand_r).toBe(20);
+      expect(counts.arm_l).toBe(7);
+      expect(counts.hand_l).toBe(20);
+    });
+
+    it("追加テスト: STEP2_setJointAngle_full_pipeline / setJointAngle呼び出し後に連動関節・筋長・伸び率が一貫して更新される検証", () => {
+      sim.resetToDefaultPose();
+
+      // 初期状態では全筋 1.0
+      const baseLengths = sim.getBaseActuatorLengths();
+      let ratios = calculateStretchRatios(baseLengths, sim.getCurrentActuatorLengths());
+      expect(ratios[sim.getActuatorId("vasint_r")]).toBeCloseTo(1.0, 5);
+
+      // 膝を 90度 (PI/2 rad) に曲げる
+      const angle90 = Math.PI / 2;
+      const clamped = sim.setJointAngle("knee_angle_r", angle90);
+      expect(clamped).toBeCloseTo(angle90, 6);
+
+      // 連動関節が自動で計算されていること
+      const trans2 = sim.getJointAngle("knee_angle_translation2_r");
+      expect(trans2).toBeGreaterThan(0);
+
+      // 伸び率が更新されていること
+      ratios = calculateStretchRatios(baseLengths, sim.getCurrentActuatorLengths());
+      expect(ratios[sim.getActuatorId("vasint_r")]).toBeGreaterThan(1.1);
+
+      // 骨格メッシュの変換行列も取得可能であること
+      const meshes = sim.getSkeletonMeshes();
+      expect(meshes.length).toBeGreaterThan(0);
+    });
+
+    it("追加テスト: measurePoseComputationTime_preserves_pose / 再計測処理が実行前の関節姿勢・連動関節・伸び率を破壊せず復元することの回帰検証", async () => {
+      const { measurePoseComputationTime } = await import("./stretch");
+      sim.resetToDefaultPose();
+      const angle90 = (90 * Math.PI) / 180;
+      sim.setJointAngle("knee_angle_r", angle90);
+
+      // 計測前の値を記録
+      const expectedKneeAngle = sim.getJointAngle("knee_angle_r");
+      const expectedTrans2 = sim.getJointAngle("knee_angle_translation2_r");
+      const baseLengths = sim.getBaseActuatorLengths();
+      const beforeRatios = calculateStretchRatios(
+        baseLengths,
+        sim.getCurrentActuatorLengths()
+      );
+      const expectedVasintRatio = beforeRatios[sim.getActuatorId("vasint_r")];
+
+      // measurePoseComputationTime を実行
+      measurePoseComputationTime(sim, 10);
+
+      // 計測後も knee_angle_r が 90°
+      const actualKneeAngle = sim.getJointAngle("knee_angle_r");
+      expect(actualKneeAngle).toBeCloseTo(angle90, 9);
+      expect(Math.abs(actualKneeAngle - expectedKneeAngle)).toBeLessThanOrEqual(1e-9);
+
+      // 連動関節 knee_angle_translation2_r が計測前と同じ値
+      const actualTrans2 = sim.getJointAngle("knee_angle_translation2_r");
+      expect(Math.abs(actualTrans2 - expectedTrans2)).toBeLessThanOrEqual(1e-9);
+
+      // vasint_r の伸び率が計測前と同じ（許容誤差 1e-9）
+      const afterRatios = calculateStretchRatios(
+        baseLengths,
+        sim.getCurrentActuatorLengths()
+      );
+      const actualVasintRatio = afterRatios[sim.getActuatorId("vasint_r")];
+      expect(Math.abs(actualVasintRatio - expectedVasintRatio)).toBeLessThanOrEqual(1e-9);
+    });
+  });
 });
