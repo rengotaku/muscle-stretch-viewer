@@ -17,7 +17,7 @@ import {
   applyPreset,
   capturePose,
   deletePreset,
-  loadPresets,
+  readPresets,
   savePreset,
   type PosePreset,
 } from "./presets";
@@ -78,9 +78,14 @@ export const MuscleViewer: React.FC = () => {
   // Independent joints list & angle states (stored in radians)
   const [joints, setJoints] = useState<IndependentJointInfo[]>([]);
   const [jointAngles, setJointAngles] = useState<Record<string, number>>({});
-  const [presets, setPresets] = useState<PosePreset[]>(() => loadPresets());
+  const [initialPresets] = useState(() => readPresets());
+  const [presets, setPresets] = useState<PosePreset[]>(
+    initialPresets.ok ? initialPresets.presets : []
+  );
   const [presetName, setPresetName] = useState("");
-  const [presetError, setPresetError] = useState<string | null>(null);
+  const [presetError, setPresetError] = useState<string | null>(
+    initialPresets.ok ? null : initialPresets.error
+  );
   const [openGroups, setOpenGroups] = useState<Record<BodyPartGroupId, boolean>>({
     torso: true,
     leg_r: true,

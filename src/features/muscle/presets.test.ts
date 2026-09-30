@@ -217,4 +217,31 @@ describe("Pose presets (localStorage)", () => {
     });
     expect(loadPresets()).toEqual([]);
   });
+
+  it("追加テスト: 壊れた JSON のとき savePreset は ok:false で setItem を呼ばず元の文字列を残す / 上書きによるデータ消失防止", () => {
+    window.localStorage.setItem(PRESETS_STORAGE_KEY, "{not json");
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+
+    const result = savePreset("新規", capturePose(sim));
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.length > 0).toBe(true);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(PRESETS_STORAGE_KEY)).toBe("{not json");
+  });
+
+  it("追加テスト: getItem だけ失敗する状態では savePreset / deletePreset が ok:false で setItem を呼ばない / 読み取り失敗時の上書き防止", () => {
+    savePreset("既存", capturePose(sim));
+    const before = window.localStorage.getItem(PRESETS_STORAGE_KEY);
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+
+    expect(savePreset("新規", capturePose(sim)).ok).toBe(false);
+    expect(deletePreset("既存").ok).toBe(false);
+    expect(setItem).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+    expect(window.localStorage.getItem(PRESETS_STORAGE_KEY)).toBe(before);
+  });
 });

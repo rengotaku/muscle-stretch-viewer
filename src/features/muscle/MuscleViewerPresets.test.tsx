@@ -159,4 +159,15 @@ describe("MuscleViewer presets UI", () => {
     render(<MuscleViewer />);
     expect(await screen.findByLabelText("既存 を読み込む")).toBeInTheDocument();
   });
+
+  it("追加テスト: presets_initial_read_failure_shown / 保存データが壊れた状態で開くとプリセット欄にエラー文言が出る", async () => {
+    window.localStorage.setItem("muscle-stretch-viewer.presets.v1", "{not json");
+    render(<MuscleViewer />);
+    await waitFor(() => expect(kneeSlider()).toBeInTheDocument());
+
+    expect(screen.getByRole("alert")).toHaveTextContent("読み込めなかった");
+    expect(window.localStorage.getItem("muscle-stretch-viewer.presets.v1")).toBe(
+      "{not json"
+    );
+  });
 });

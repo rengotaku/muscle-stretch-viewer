@@ -24,19 +24,34 @@ function isPreset(value: unknown): value is PosePreset {
   );
 }
 
+export type PresetReadResult =
+  | { ok: true; presets: PosePreset[] }
+  | { ok: false; error: string };
+
+const READ_FAILED_MESSAGE =
+  "保存済みのプリセットを読み込めなかったため、上書きを防ぐために保存を中止しました";
+
 /**
- * Reads saved presets. Broken JSON, non-array values, malformed entries and
- * storage access errors all yield an empty (or filtered) list instead of throwing.
+ * Reads saved presets, distinguishing failure from an empty list. getItem errors,
+ * broken JSON and a non-array top level are failures; individual malformed entries
+ * are skipped and still count as success.
  */
-export function loadPresets(): PosePreset[] {
+export function readPresets(): PresetReadResult {
   try {
     const raw = window.localStorage.getItem(PRESETS_STORAGE_KEY);
-    if (raw === null) return [];
+    if (raw === null) return { ok: true, presets: [] };
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter(isPreset) : [];
+    if (!Array.isArray(parsed)) return { ok: false, error: READ_FAILED_MESSAGE };
+    return { ok: true, presets: parsed.filter(isPreset) };
   } catch {
-    return [];
+    return { ok: false, error: READ_FAILED_MESSAGE };
   }
+}
+
+/** Reads saved presets; returns an empty list when they cannot be read. */
+export function loadPresets(): PosePreset[] {
+  const result = readPresets();
+  return result.ok ? result.presets : [];
 }
 
 function writePresets(presets: PosePreset[]): PresetWriteResult {
@@ -71,7 +86,9 @@ export function savePreset(
     return { ok: false, error: "プリセット名を入力してください" };
   }
   const next: PosePreset = { name: trimmed, angles: { ...angles } };
-  const current = loadPresets();
+  const read = readPresets();
+  if (!read.ok) return read;
+  const current = read.presets;
   const exists = current.some((p) => p.name === trimmed);
   const presets = exists
     ? current.map((p) => (p.name === trimmed ? next : p))
@@ -81,7 +98,9 @@ export function savePreset(
 
 /** Removes the preset with the given name. */
 export function deletePreset(name: string): PresetWriteResult {
-  return writePresets(loadPresets().filter((p) => p.name !== name));
+  const read = readPresets();
+  if (!read.ok) return read;
+  return writePresets(read.presets.filter((p) => p.name !== name));
 }
 
 /**
