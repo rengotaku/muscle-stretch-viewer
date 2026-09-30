@@ -127,5 +127,64 @@ describe("Muscle stretch ratio calculation and MyoFullBody simulation", () => {
         expect(ratio).toBeLessThan(1.0);
       }
     });
+
+    it("追加テスト: MyoSimulation_getMuscleTendonPaths / wrap込み腱経路点と伸び率の紐付け取得検証", () => {
+      sim.applyForwardBendPose();
+      const baseLengths = sim.getBaseActuatorLengths();
+      const currentLengths = sim.getCurrentActuatorLengths();
+      const ratios = calculateStretchRatios(baseLengths, currentLengths);
+
+      const paths = sim.getMuscleTendonPaths(ratios);
+      expect(paths.length).toBe(416);
+
+      // Check bflh_r (hamstrings)
+      const bflh = paths.find((p) => p.actuatorName === "bflh_r");
+      expect(bflh).toBeDefined();
+      expect(bflh!.points.length).toBeGreaterThanOrEqual(2);
+      expect(bflh!.stretchRatio).toBeGreaterThan(1.1);
+
+      // Check recfem_r (rectus femoris)
+      const recfem = paths.find((p) => p.actuatorName === "recfem_r");
+      expect(recfem).toBeDefined();
+      expect(recfem!.stretchRatio).toBeLessThan(1.0);
+    });
+
+    it("追加テスト: MyoSimulation_getSkeletonMeshes / 骨格メッシュ頂点・面・変換行列の取得検証", () => {
+      const meshes = sim.getSkeletonMeshes();
+      expect(meshes.length).toBe(102);
+
+      const firstMesh = meshes[0];
+      expect(firstMesh.vertices.length).toBeGreaterThan(0);
+      expect(firstMesh.indices.length).toBeGreaterThan(0);
+      expect(firstMesh.transform.length).toBe(16);
+    });
+  });
+
+  describe("STEP2: getStretchColorHex", () => {
+    it("追加テスト: getStretchColorHex / 伸び率に応じた寒色・中立・暖色の色マッピング検証", async () => {
+      const { getStretchColorHex } = await import("./stretch");
+
+      // Neutral: ratio = 1.0
+      const neutralColor = getStretchColorHex(1.0);
+      expect(neutralColor.toLowerCase()).toBe("#f0f0f0");
+
+      // Warm (stretched): ratio = 1.2+
+      const stretchedColor = getStretchColorHex(1.25);
+      // Red hue should dominate (R > B and R > G)
+      const rWarm = parseInt(stretchedColor.slice(1, 3), 16);
+      const bWarm = parseInt(stretchedColor.slice(5, 7), 16);
+      expect(rWarm).toBeGreaterThan(bWarm);
+
+      // Cold (shortened): ratio = 0.8-
+      const shortenedColor = getStretchColorHex(0.75);
+      // Blue hue should dominate (B > R)
+      const rCold = parseInt(shortenedColor.slice(1, 3), 16);
+      const bCold = parseInt(shortenedColor.slice(5, 7), 16);
+      expect(bCold).toBeGreaterThan(rCold);
+
+      // Invalid: NaN
+      const invalidColor = getStretchColorHex(Number.NaN);
+      expect(invalidColor).toBe("#94a3b8");
+    });
   });
 });
