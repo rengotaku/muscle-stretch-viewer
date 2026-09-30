@@ -678,7 +678,7 @@ export const MuscleViewer: React.FC = () => {
               ))}
             </div>
             <div className="mt-2 text-[10px] text-slate-400">
-              ※ 太もも裏のハムストリングス（bflh_r 等）が赤く伸張（&gt; 1.1x）
+              伸び率 = 今の筋長 ÷ 基準姿勢（立位）での筋長。1.0 より大きいと伸びている
             </div>
           </div>
 

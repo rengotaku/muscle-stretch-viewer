@@ -434,5 +434,42 @@ describe("Muscle stretch ratio calculation and MyoFullBody simulation", () => {
       const meshes = sim.getSkeletonMeshes();
       expect(meshes.length).toBeGreaterThan(0);
     });
+
+    it("追加テスト: measurePoseComputationTime_preserves_pose / 再計測処理が実行前の関節姿勢・連動関節・伸び率を破壊せず復元することの回帰検証", async () => {
+      const { measurePoseComputationTime } = await import("./stretch");
+      sim.resetToDefaultPose();
+      const angle90 = (90 * Math.PI) / 180;
+      sim.setJointAngle("knee_angle_r", angle90);
+
+      // 計測前の値を記録
+      const expectedKneeAngle = sim.getJointAngle("knee_angle_r");
+      const expectedTrans2 = sim.getJointAngle("knee_angle_translation2_r");
+      const baseLengths = sim.getBaseActuatorLengths();
+      const beforeRatios = calculateStretchRatios(
+        baseLengths,
+        sim.getCurrentActuatorLengths()
+      );
+      const expectedVasintRatio = beforeRatios[sim.getActuatorId("vasint_r")];
+
+      // measurePoseComputationTime を実行
+      measurePoseComputationTime(sim, 10);
+
+      // 計測後も knee_angle_r が 90°
+      const actualKneeAngle = sim.getJointAngle("knee_angle_r");
+      expect(actualKneeAngle).toBeCloseTo(angle90, 9);
+      expect(Math.abs(actualKneeAngle - expectedKneeAngle)).toBeLessThanOrEqual(1e-9);
+
+      // 連動関節 knee_angle_translation2_r が計測前と同じ値
+      const actualTrans2 = sim.getJointAngle("knee_angle_translation2_r");
+      expect(Math.abs(actualTrans2 - expectedTrans2)).toBeLessThanOrEqual(1e-9);
+
+      // vasint_r の伸び率が計測前と同じ（許容誤差 1e-9）
+      const afterRatios = calculateStretchRatios(
+        baseLengths,
+        sim.getCurrentActuatorLengths()
+      );
+      const actualVasintRatio = afterRatios[sim.getActuatorId("vasint_r")];
+      expect(Math.abs(actualVasintRatio - expectedVasintRatio)).toBeLessThanOrEqual(1e-9);
+    });
   });
 });

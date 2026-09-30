@@ -695,29 +695,37 @@ export function measurePoseComputationTime(
   sim: MyoSimulation,
   iterations = 100
 ): PoseBenchmarkResult {
-  const baseLengths = sim.getBaseActuatorLengths();
+  const savedQpos = sim.data?.qpos ? new Float64Array(sim.data.qpos) : null;
+  try {
+    const baseLengths = sim.getBaseActuatorLengths();
 
-  // 1. Measure single run
-  const tStartSingle = performance.now();
-  sim.applyForwardBendPose();
-  const singleCurrent = sim.getCurrentActuatorLengths();
-  calculateStretchRatios(baseLengths, singleCurrent);
-  const singleMs = performance.now() - tStartSingle;
-
-  // 2. Measure multiple runs for average
-  const tStartIter = performance.now();
-  for (let i = 0; i < iterations; i++) {
+    // 1. Measure single run
+    const tStartSingle = performance.now();
     sim.applyForwardBendPose();
-    const cur = sim.getCurrentActuatorLengths();
-    calculateStretchRatios(baseLengths, cur);
-  }
-  const avgMs = (performance.now() - tStartIter) / iterations;
+    const singleCurrent = sim.getCurrentActuatorLengths();
+    calculateStretchRatios(baseLengths, singleCurrent);
+    const singleMs = performance.now() - tStartSingle;
 
-  return {
-    singleMs,
-    avgMs,
-    iterations,
-  };
+    // 2. Measure multiple runs for average
+    const tStartIter = performance.now();
+    for (let i = 0; i < iterations; i++) {
+      sim.applyForwardBendPose();
+      const cur = sim.getCurrentActuatorLengths();
+      calculateStretchRatios(baseLengths, cur);
+    }
+    const avgMs = (performance.now() - tStartIter) / iterations;
+
+    return {
+      singleMs,
+      avgMs,
+      iterations,
+    };
+  } finally {
+    if (savedQpos && sim.data?.qpos) {
+      sim.data.qpos.set(savedQpos);
+      sim.mujoco?.mj_forward?.(sim.model, sim.data);
+    }
+  }
 }
 
 /**
