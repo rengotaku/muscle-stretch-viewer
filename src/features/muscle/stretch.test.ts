@@ -158,6 +158,16 @@ describe("Muscle stretch ratio calculation and MyoFullBody simulation", () => {
       expect(firstMesh.indices.length).toBeGreaterThan(0);
       expect(firstMesh.transform.length).toBe(16);
     });
+
+    it("追加テスト: measurePoseComputationTime / ポーズ計算時間（単発および複数回平均）の計測検証", async () => {
+      const { measurePoseComputationTime } = await import("./stretch");
+
+      const result = measurePoseComputationTime(sim, 10);
+      expect(result.singleMs).toBeGreaterThan(0);
+      expect(result.avgMs).toBeGreaterThan(0);
+      expect(result.iterations).toBe(10);
+      expect(result.avgMs).toBeLessThan(100);
+    });
   });
 
   describe("STEP2: getStretchColorHex", () => {

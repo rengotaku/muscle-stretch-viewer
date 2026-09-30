@@ -5,6 +5,9 @@ import {
   calculateStretchRatios,
   getStretchColorHex,
   loadMyoSimulationFromFetch,
+  measurePoseComputationTime,
+  logBenchmarkResults,
+  type BenchmarkMetrics,
   MyoSimulation,
 } from "./stretch";
 
@@ -59,6 +62,23 @@ export const MuscleViewer: React.FC = () => {
     "forward_bend"
   );
   const [selectedMuscles, setSelectedMuscles] = useState<MuscleInfo[]>([]);
+  const [benchmark, setBenchmark] = useState<BenchmarkMetrics | null>(null);
+
+  // Measure pose computation time (single and 100 runs average) and log to console.info
+  const runBenchmark = useCallback(() => {
+    const sim = simRef.current;
+    if (!sim) return;
+
+    const res = measurePoseComputationTime(sim, 100);
+    const metrics: BenchmarkMetrics = {
+      loadTimeMs: sim.loadTimeMs ?? 0,
+      singlePoseMs: res.singleMs,
+      avgPoseMs: res.avgMs,
+      iterations: res.iterations,
+    };
+    setBenchmark(metrics);
+    logBenchmarkResults(metrics);
+  }, []);
 
   // Build muscle geometries and materials inside Three.js group
   const updateMuscleMeshes = useCallback((sim: MyoSimulation) => {
@@ -329,6 +349,17 @@ export const MuscleViewer: React.FC = () => {
         // Build muscles
         updateMuscleMeshes(sim);
 
+        // Measure pose computation time (single and 100 runs average) and log to console.info
+        const res = measurePoseComputationTime(sim, 100);
+        const metrics: BenchmarkMetrics = {
+          loadTimeMs: sim.loadTimeMs ?? 0,
+          singlePoseMs: res.singleMs,
+          avgPoseMs: res.avgMs,
+          iterations: res.iterations,
+        };
+        setBenchmark(metrics);
+        logBenchmarkResults(metrics);
+
         setLoading(false);
       })
       .catch((err) => {
@@ -481,8 +512,52 @@ export const MuscleViewer: React.FC = () => {
         </div>
       </div>
 
-      {/* Navigation hint (Bottom right) */}
-      <div className="absolute bottom-4 right-4 z-20 text-[11px] text-slate-500 bg-slate-900/70 px-2.5 py-1 rounded backdrop-blur-sm">
+      {/* Performance Benchmark panel (Bottom right) */}
+      {benchmark && (
+        <div className="absolute bottom-4 right-4 z-20 bg-slate-900/90 backdrop-blur-md p-3 rounded-lg border border-slate-800 text-xs shadow-lg w-72">
+          <div className="font-semibold text-slate-200 mb-1.5 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block size-2 rounded-full bg-emerald-400" />
+              <span>パフォーマンス実測 (performance.now)</span>
+            </span>
+            <button
+              type="button"
+              onClick={runBenchmark}
+              className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 px-1.5 py-0.5 rounded transition-colors"
+            >
+              再計測
+            </button>
+          </div>
+          <div className="space-y-1 font-mono text-[11px]">
+            <div className="flex justify-between gap-2 py-0.5 border-b border-slate-800/80">
+              <span className="text-slate-400 font-sans">(a) 読み込み時間:</span>
+              <span className="text-emerald-400 font-bold">
+                {benchmark.loadTimeMs.toFixed(1)} ms
+              </span>
+            </div>
+            <div className="flex justify-between gap-2 py-0.5">
+              <span className="text-slate-400 font-sans">(b) ポーズ計算 (単発):</span>
+              <span className="text-amber-400 font-bold">
+                {benchmark.singlePoseMs.toFixed(3)} ms
+              </span>
+            </div>
+            <div className="flex justify-between gap-2 py-0.5">
+              <span className="text-slate-400 font-sans">
+                (b) ポーズ計算 (100回平均):
+              </span>
+              <span className="text-amber-400 font-bold">
+                {benchmark.avgPoseMs.toFixed(3)} ms
+              </span>
+            </div>
+          </div>
+          <div className="mt-1.5 text-[9px] text-slate-500 pt-1 border-t border-slate-800 leading-tight">
+            ※ qpos 設定 → mj_forward → 416 筋伸び率（描画除外）
+          </div>
+        </div>
+      )}
+
+      {/* Navigation hint (Bottom center) */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 text-[10px] text-slate-500 bg-slate-900/80 px-2.5 py-1 rounded backdrop-blur-sm pointer-events-none border border-slate-800/50">
         ドラッグ: 回転 | 右ドラッグ: 平行移動 | ホイール: ズーム
       </div>
     </div>

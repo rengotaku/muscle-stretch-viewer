@@ -122,6 +122,8 @@ export class MyoSimulation {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly data: any;
 
+  loadTimeMs?: number;
+
   private readonly cachedBaseLengths: Float64Array;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -365,6 +367,7 @@ export async function loadMyoSimulationFromFetch(
   baseUrl = "/models/myo",
   onProgress?: (loaded: number, total: number, message: string) => void
 ): Promise<MyoSimulation> {
+  const startTime = performance.now();
   const mujoco = await loadMujoco();
 
   try {
@@ -412,5 +415,79 @@ export async function loadMyoSimulationFromFetch(
   const model = mujoco.MjModel.from_xml_path("/model/myofullbody.xml");
   const data = new mujoco.MjData(model);
 
-  return new MyoSimulation(mujoco, model, data);
+  const sim = new MyoSimulation(mujoco, model, data);
+  sim.loadTimeMs = performance.now() - startTime;
+
+  return sim;
+}
+
+/**
+ * Result of measuring pose computation time.
+ */
+export interface PoseBenchmarkResult {
+  /** Time for a single pose calculation in milliseconds (qpos setup -> mj_forward -> calculate stretch ratios) */
+  singleMs: number;
+  /** Average time across multiple iterations in milliseconds */
+  avgMs: number;
+  /** Number of iterations executed */
+  iterations: number;
+}
+
+/**
+ * Measures the pose computation time:
+ * Sets joint angles for forward bend, executes mj_forward, and calculates stretch ratios for all 416 muscles.
+ * Does NOT include Three.js rendering.
+ *
+ * @param sim - MyoSimulation instance
+ * @param iterations - Number of repetitions to compute average (default: 100)
+ */
+export function measurePoseComputationTime(
+  sim: MyoSimulation,
+  iterations = 100
+): PoseBenchmarkResult {
+  const baseLengths = sim.getBaseActuatorLengths();
+
+  // 1. Measure single run
+  const tStartSingle = performance.now();
+  sim.applyForwardBendPose();
+  const singleCurrent = sim.getCurrentActuatorLengths();
+  calculateStretchRatios(baseLengths, singleCurrent);
+  const singleMs = performance.now() - tStartSingle;
+
+  // 2. Measure multiple runs for average
+  const tStartIter = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    sim.applyForwardBendPose();
+    const cur = sim.getCurrentActuatorLengths();
+    calculateStretchRatios(baseLengths, cur);
+  }
+  const avgMs = (performance.now() - tStartIter) / iterations;
+
+  return {
+    singleMs,
+    avgMs,
+    iterations,
+  };
+}
+
+/**
+ * Formatted benchmark metrics container.
+ */
+export interface BenchmarkMetrics {
+  loadTimeMs: number;
+  singlePoseMs: number;
+  avgPoseMs: number;
+  iterations: number;
+}
+
+/**
+ * Logs benchmark results to console.info in a clear structured format.
+ */
+export function logBenchmarkResults(metrics: BenchmarkMetrics): void {
+  console.info(
+    `[MuJoCo Benchmark Results]\n` +
+      `  • (a) Model Load Time: ${metrics.loadTimeMs.toFixed(1)} ms (fetch start -> model creation)\n` +
+      `  • (b) Pose Computation Time (single): ${metrics.singlePoseMs.toFixed(3)} ms (qpos -> mj_forward -> 416 ratios)\n` +
+      `  • (b) Pose Computation Time (100 runs avg): ${metrics.avgPoseMs.toFixed(3)} ms`
+  );
 }
