@@ -544,48 +544,11 @@ export const MuscleViewer: React.FC = () => {
   }, [supported, syncAnglesFromSim, updateMuscleMeshes]);
 
   return (
-    <div className="flex flex-col xl:flex-row w-full gap-4 items-start">
-      {/* 3D Viewport container */}
-      <div className="relative flex flex-col flex-1 w-full h-[700px] bg-slate-950 rounded-xl overflow-hidden shadow-2xl border border-slate-800 min-w-0">
-        <div
-          ref={containerRef}
-          className="w-full h-full cursor-grab active:cursor-grabbing"
-        />
-
-        {/* Loading overlay */}
-        {loading && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/85 backdrop-blur-sm">
-            <div className="size-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
-            <p className="text-slate-200 font-medium text-lg mb-2">
-              MyoFullBody 筋骨格モデルを読み込み中...
-            </p>
-            <p className="text-slate-400 text-sm mb-4">{loadingStatus.message}</p>
-            <div className="w-64 h-2 bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary transition-all duration-200"
-                style={{
-                  width: `${Math.round((loadingStatus.loaded / (loadingStatus.total || 1)) * 100)}%`,
-                }}
-              />
-            </div>
-            <span className="text-xs text-slate-500 mt-2">
-              {loadingStatus.loaded} / {loadingStatus.total} files
-            </span>
-          </div>
-        )}
-
-        {/* Error state */}
-        {loadError && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/90 p-6 text-center">
-            <div className="text-red-400 font-bold text-lg mb-2">
-              モデル読み込みエラー
-            </div>
-            <p className="text-slate-400 text-sm max-w-md">{loadError}</p>
-          </div>
-        )}
-
-        {/* Control bar (Top left) */}
-        <div className="absolute top-4 left-4 z-20 flex flex-wrap gap-2 items-center bg-slate-900/80 backdrop-blur-md p-2 rounded-lg border border-slate-800">
+    <div className="flex flex-col xl:flex-row w-full gap-4 items-stretch">
+      {/* Left column: pose bar / 3D viewport / readouts */}
+      <div className="flex flex-col flex-1 min-w-0 gap-3">
+        {/* Pose bar (outside the canvas so it never covers the skeleton) */}
+        <div className="flex flex-wrap gap-2 items-center bg-slate-900 p-2 rounded-lg border border-slate-800">
           <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2">
             ポーズ:
           </span>
@@ -613,216 +576,265 @@ export const MuscleViewer: React.FC = () => {
           </button>
         </div>
 
-        {/* Color Legend (Top right) */}
-        <div className="absolute top-4 right-4 z-20 bg-slate-900/85 backdrop-blur-md p-3.5 rounded-lg border border-slate-800 text-slate-200 text-xs shadow-lg max-w-xs">
-          <div className="font-semibold text-slate-100 mb-2 flex items-center justify-between">
-            <span>伸び率の凡例 (Color Legend)</span>
-          </div>
-          {/* 5 つの停止点は getStretchColorHex の 0.8 / 0.9 / 1.0 / 1.1 / 1.2 と一致させる（Tailwind の via-* は重ねると上書きされ 1 点しか効かない） */}
+        {/* 3D Viewport container */}
+        <div className="relative h-[520px] xl:h-[640px] w-full bg-slate-950 rounded-xl overflow-hidden shadow-2xl border border-slate-800">
           <div
-            className="w-full h-3 rounded-full mb-1.5"
-            style={{
-              background:
-                "linear-gradient(to right, #1e3a8a 0%, #38bdf8 25%, #f0f0f0 50%, #facc15 75%, #ef4444 100%)",
-            }}
+            ref={containerRef}
+            className="w-full h-full cursor-grab active:cursor-grabbing"
           />
-          <div className="flex justify-between text-[10px] text-slate-400 mb-2 font-mono">
-            <span>≤ 0.8</span>
-            <span>0.9</span>
-            <span>1.0</span>
-            <span>1.1</span>
-            <span>≥ 1.2</span>
+
+          {/* Loading overlay */}
+          {loading && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/85 backdrop-blur-sm">
+              <div className="size-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
+              <p className="text-slate-200 font-medium text-lg mb-2">
+                MyoFullBody 筋骨格モデルを読み込み中...
+              </p>
+              <p className="text-slate-400 text-sm mb-4">{loadingStatus.message}</p>
+              <div className="w-64 h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-200"
+                  style={{
+                    width: `${Math.round((loadingStatus.loaded / (loadingStatus.total || 1)) * 100)}%`,
+                  }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 mt-2">
+                {loadingStatus.loaded} / {loadingStatus.total} files
+              </span>
+            </div>
+          )}
+
+          {/* Error state */}
+          {loadError && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/90 p-6 text-center">
+              <div className="text-red-400 font-bold text-lg mb-2">
+                モデル読み込みエラー
+              </div>
+              <p className="text-slate-400 text-sm max-w-md">{loadError}</p>
+            </div>
+          )}
+
+          {/* Color Legend (Top right, compact) */}
+          <div className="absolute top-3 right-3 z-20 w-56 bg-slate-900/80 backdrop-blur-md px-3 py-2.5 rounded-lg border border-slate-800 text-slate-200 text-xs shadow-lg">
+            <div className="font-semibold text-slate-100 mb-1.5">
+              伸び率の凡例 (Color Legend)
+            </div>
+            {/* 5 つの停止点は getStretchColorHex の 0.8 / 0.9 / 1.0 / 1.1 / 1.2 と一致させる（Tailwind の via-* は重ねると上書きされ 1 点しか効かない） */}
+            <div
+              className="w-full h-2.5 rounded-full mb-1"
+              style={{
+                background:
+                  "linear-gradient(to right, #1e3a8a 0%, #38bdf8 25%, #f0f0f0 50%, #facc15 75%, #ef4444 100%)",
+              }}
+            />
+            <div className="flex justify-between text-[10px] text-slate-400 mb-1.5 font-mono">
+              <span>≤ 0.8</span>
+              <span>0.9</span>
+              <span>1.0</span>
+              <span>1.1</span>
+              <span>≥ 1.2</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1 text-[10px] pt-1.5 border-t border-slate-700/70 text-center">
+              <div className="text-sky-400 font-medium">縮小 (寒色)</div>
+              <div className="text-slate-300 font-medium">中立 (白)</div>
+              <div className="text-rose-400 font-medium">伸張 (暖色)</div>
+            </div>
           </div>
-          <div className="grid grid-cols-3 gap-1 text-[11px] pt-1 border-t border-slate-800 text-center">
-            <div className="text-sky-400 font-medium">縮小 (寒色)</div>
-            <div className="text-slate-300 font-medium">中立 (白)</div>
-            <div className="text-rose-400 font-medium">伸張 (暖色)</div>
+
+          {/* Navigation hint (Bottom center) */}
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 text-[10px] text-slate-400 bg-slate-900/70 px-2.5 py-1 rounded backdrop-blur-sm pointer-events-none border border-slate-800/50 whitespace-nowrap">
+            ドラッグ: 回転 | 右ドラッグ: 平行移動 | ホイール: ズーム
           </div>
         </div>
 
-        {/* Muscle stretch details panel (Bottom left) */}
-        <div className="absolute bottom-4 left-4 z-20 bg-slate-900/85 backdrop-blur-md p-3 rounded-lg border border-slate-800 text-xs shadow-lg max-w-sm">
-          <div className="font-semibold text-slate-200 mb-2 flex items-center gap-1.5">
-            <span className="inline-block size-2 rounded-full bg-rose-500 animate-pulse" />
-            <span>代表筋肉の実測伸び率</span>
+        {/* Readouts below the 3D view */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+          {/* Muscle stretch details panel */}
+          <div className="lg:col-span-3 bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-xs">
+            <div className="font-semibold text-slate-200 mb-2 flex items-center gap-1.5 text-sm">
+              <span className="inline-block size-2 rounded-full bg-rose-500 animate-pulse" />
+              <span>代表筋肉の実測伸び率</span>
+            </div>
+            <div className="grid grid-cols-1 gap-y-1">
+              {selectedMuscles.map((m) => (
+                <div
+                  key={m.name}
+                  className="flex items-center justify-between gap-3 py-1 border-b border-slate-800/70"
+                >
+                  <span className="text-slate-300 truncate" title={m.label}>
+                    {m.label}
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span
+                      className="size-2.5 rounded-full inline-block"
+                      style={{ backgroundColor: m.color }}
+                    />
+                    <span className="font-mono font-medium text-slate-100 tabular-nums w-16 text-right">
+                      {m.ratio.toFixed(3)}x
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-[10px] text-slate-400">
+              ※ 太もも裏のハムストリングス（bflh_r 等）が赤く伸張（&gt; 1.1x）
+            </div>
           </div>
-          <div className="space-y-1.5">
-            {selectedMuscles.map((m) => (
-              <div
-                key={m.name}
-                className="flex items-center justify-between gap-4 py-0.5"
-              >
-                <span className="text-slate-300 truncate">{m.label}</span>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <span
-                    className="size-2.5 rounded-full inline-block"
-                    style={{ backgroundColor: m.color }}
-                  />
-                  <span className="font-mono font-medium text-slate-100">
-                    {m.ratio.toFixed(3)}x
+
+          {/* Performance Benchmark panel */}
+          {benchmark && (
+            <div className="lg:col-span-2 bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-xs">
+              <div className="font-semibold text-slate-200 mb-2 flex items-center justify-between gap-2 text-sm">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block size-2 rounded-full bg-emerald-400" />
+                  <span>パフォーマンス実測 (performance.now)</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={runBenchmark}
+                  className="shrink-0 text-[11px] text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded transition-colors"
+                >
+                  再計測
+                </button>
+              </div>
+              <div className="font-mono text-[11px]">
+                <div className="flex justify-between gap-2 py-1 border-b border-slate-800/80">
+                  <span className="text-slate-400 font-sans">(a) 読み込み時間:</span>
+                  <span className="text-emerald-400 font-bold tabular-nums">
+                    {benchmark.loadTimeMs.toFixed(1)} ms
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2 py-1 border-b border-slate-800/80">
+                  <span className="text-slate-400 font-sans">(b) ポーズ計算 (単発):</span>
+                  <span className="text-amber-400 font-bold tabular-nums">
+                    {benchmark.singlePoseMs.toFixed(3)} ms
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2 py-1">
+                  <span className="text-slate-400 font-sans">
+                    (b) ポーズ計算 (100回平均):
+                  </span>
+                  <span className="text-amber-400 font-bold tabular-nums">
+                    {benchmark.avgPoseMs.toFixed(3)} ms
                   </span>
                 </div>
               </div>
-            ))}
-          </div>
-          <div className="mt-2 text-[10px] text-slate-400 pt-1.5 border-t border-slate-800">
-            ※ 太もも裏のハムストリングス（bflh_r 等）が赤く伸張（&gt; 1.1x）
-          </div>
-        </div>
-
-        {/* Performance Benchmark panel (Bottom right) */}
-        {benchmark && (
-          <div className="absolute bottom-4 right-4 z-20 bg-slate-900/90 backdrop-blur-md p-3 rounded-lg border border-slate-800 text-xs shadow-lg w-72">
-            <div className="font-semibold text-slate-200 mb-1.5 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block size-2 rounded-full bg-emerald-400" />
-                <span>パフォーマンス実測 (performance.now)</span>
-              </span>
-              <button
-                type="button"
-                onClick={runBenchmark}
-                className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 px-1.5 py-0.5 rounded transition-colors"
-              >
-                再計測
-              </button>
-            </div>
-            <div className="space-y-1 font-mono text-[11px]">
-              <div className="flex justify-between gap-2 py-0.5 border-b border-slate-800/80">
-                <span className="text-slate-400 font-sans">(a) 読み込み時間:</span>
-                <span className="text-emerald-400 font-bold">
-                  {benchmark.loadTimeMs.toFixed(1)} ms
-                </span>
-              </div>
-              <div className="flex justify-between gap-2 py-0.5">
-                <span className="text-slate-400 font-sans">(b) ポーズ計算 (単発):</span>
-                <span className="text-amber-400 font-bold">
-                  {benchmark.singlePoseMs.toFixed(3)} ms
-                </span>
-              </div>
-              <div className="flex justify-between gap-2 py-0.5">
-                <span className="text-slate-400 font-sans">
-                  (b) ポーズ計算 (100回平均):
-                </span>
-                <span className="text-amber-400 font-bold">
-                  {benchmark.avgPoseMs.toFixed(3)} ms
-                </span>
+              <div className="mt-1.5 text-[10px] text-slate-500 leading-tight">
+                ※ qpos 設定 → mj_forward → 416 筋伸び率（描画除外）
               </div>
             </div>
-            <div className="mt-1.5 text-[9px] text-slate-500 pt-1 border-t border-slate-800 leading-tight">
-              ※ qpos 設定 → mj_forward → 416 筋伸び率（描画除外）
-            </div>
-          </div>
-        )}
-
-        {/* Navigation hint (Bottom center) */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 text-[10px] text-slate-500 bg-slate-900/80 px-2.5 py-1 rounded backdrop-blur-sm pointer-events-none border border-slate-800/50">
-          ドラッグ: 回転 | 右ドラッグ: 平行移動 | ホイール: ズーム
+          )}
         </div>
       </div>
 
-      {/* 71 Joint Sliders Panel */}
-      <div className="flex flex-col w-full xl:w-96 bg-slate-900/95 backdrop-blur-md rounded-xl border border-slate-800 p-4 shadow-xl xl:max-h-[700px] overflow-hidden">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-          <div>
-            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <span className="inline-block size-2 rounded-full bg-primary" />
-              関節角度コントロール
-            </h3>
-            <p className="text-[11px] text-slate-400">
-              独立関節 {joints.length || 71} 個（可動域に従って連動計算）
-            </p>
-          </div>
-          <div className="flex gap-1.5 text-[11px]">
-            <button
-              type="button"
-              onClick={expandAllGroups}
-              className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
-            >
-              全開
-            </button>
-            <button
-              type="button"
-              onClick={collapseAllGroups}
-              className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
-            >
-              全閉
-            </button>
-          </div>
-        </div>
-
-        {/* Group list with scroll */}
-        <div className="flex-1 overflow-y-auto space-y-2 mt-3 pr-1 max-h-[620px]">
-          {BODY_PART_GROUPS.map((group) => {
-            const list = groupedJoints.get(group.id) ?? [];
-            if (list.length === 0) return null;
-            const isOpen = openGroups[group.id];
-
-            return (
-              <div
-                key={group.id}
-                className="border border-slate-800/90 rounded-lg overflow-hidden bg-slate-950/40"
+      {/* 71 Joint Sliders Panel: on xl it matches the left column height and scrolls inside */}
+      <div className="relative w-full xl:w-96 xl:shrink-0">
+        <div className="flex flex-col max-h-[640px] xl:max-h-none xl:absolute xl:inset-0 bg-slate-900/95 rounded-xl border border-slate-800 p-4 shadow-xl overflow-hidden">
+          <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                <span className="inline-block size-2 rounded-full bg-primary" />
+                関節角度コントロール
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                独立関節 {joints.length || 71} 個（可動域に従って連動計算）
+              </p>
+            </div>
+            <div className="flex gap-1.5 text-[11px] shrink-0">
+              <button
+                type="button"
+                onClick={expandAllGroups}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
               >
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(group.id)}
-                  className="w-full flex items-center justify-between p-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-800/60 transition-colors text-left"
+                全開
+              </button>
+              <button
+                type="button"
+                onClick={collapseAllGroups}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+              >
+                全閉
+              </button>
+            </div>
+          </div>
+
+          {/* Group list with scroll */}
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2 mt-3 pr-1">
+            {BODY_PART_GROUPS.map((group) => {
+              const list = groupedJoints.get(group.id) ?? [];
+              if (list.length === 0) return null;
+              const isOpen = openGroups[group.id];
+
+              return (
+                <div
+                  key={group.id}
+                  className="border border-slate-800/90 rounded-lg overflow-hidden bg-slate-950/40"
                 >
-                  <span className="flex items-center gap-1.5">
-                    <span>{group.label}</span>
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      ({list.length})
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-semibold text-slate-100 bg-slate-800/40 hover:bg-slate-800/80 transition-colors text-left"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>{group.label}</span>
+                      <span className="text-[11px] text-slate-500 font-mono font-normal">
+                        ({list.length})
+                      </span>
                     </span>
-                  </span>
-                  <span className="text-slate-500 text-[10px]">{isOpen ? "▲" : "▼"}</span>
-                </button>
+                    <span className="text-slate-500 text-[10px]">
+                      {isOpen ? "▲" : "▼"}
+                    </span>
+                  </button>
 
-                {isOpen && (
-                  <div className="p-3 pt-1 space-y-3 border-t border-slate-800/50 bg-slate-950/20">
-                    {list.map((joint) => {
-                      const curRad = jointAngles[joint.name] ?? joint.defaultValue;
-                      const curDeg = (curRad * 180) / Math.PI;
-                      const minDeg = (joint.min * 180) / Math.PI;
-                      const maxDeg = (joint.max * 180) / Math.PI;
+                  {isOpen && (
+                    <div className="px-3 py-3 space-y-3.5 border-t border-slate-800/50">
+                      {list.map((joint) => {
+                        const curRad = jointAngles[joint.name] ?? joint.defaultValue;
+                        const curDeg = (curRad * 180) / Math.PI;
+                        const minDeg = (joint.min * 180) / Math.PI;
+                        const maxDeg = (joint.max * 180) / Math.PI;
 
-                      return (
-                        <div key={joint.id} className="space-y-1">
-                          <div className="flex justify-between items-center text-xs">
-                            <label
-                              htmlFor={`slider-${joint.name}`}
-                              className="text-slate-300 font-mono text-[11px] truncate max-w-[190px]"
-                              title={joint.name}
-                            >
-                              {joint.name}
-                            </label>
-                            <span className="font-mono text-emerald-400 font-semibold text-[11px]">
-                              {curDeg.toFixed(1)}°
-                            </span>
+                        return (
+                          <div key={joint.id} className="space-y-1">
+                            <div className="flex justify-between items-baseline gap-2">
+                              <label
+                                htmlFor={`slider-${joint.name}`}
+                                className="flex-1 min-w-0 text-slate-300 font-mono text-xs truncate"
+                                title={joint.name}
+                              >
+                                {joint.name}
+                              </label>
+                              <span className="w-16 shrink-0 text-right tabular-nums font-mono text-emerald-400 font-semibold text-xs">
+                                {curDeg.toFixed(1)}°
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              id={`slider-${joint.name}`}
+                              aria-label={joint.name}
+                              min={minDeg.toFixed(1)}
+                              max={maxDeg.toFixed(1)}
+                              step={0.5}
+                              value={curDeg.toFixed(1)}
+                              onChange={(e) =>
+                                handleSliderChange(joint.name, parseFloat(e.target.value))
+                              }
+                              className="w-full accent-primary h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                            />
+                            <div className="flex justify-between text-[10px] text-slate-500 font-mono tabular-nums">
+                              <span>{minDeg.toFixed(0)}°</span>
+                              <span>{maxDeg.toFixed(0)}°</span>
+                            </div>
                           </div>
-                          <input
-                            type="range"
-                            id={`slider-${joint.name}`}
-                            aria-label={joint.name}
-                            min={minDeg.toFixed(1)}
-                            max={maxDeg.toFixed(1)}
-                            step={0.5}
-                            value={curDeg.toFixed(1)}
-                            onChange={(e) =>
-                              handleSliderChange(joint.name, parseFloat(e.target.value))
-                            }
-                            className="w-full accent-primary h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer"
-                          />
-                          <div className="flex justify-between text-[9px] text-slate-500 font-mono">
-                            <span>{minDeg.toFixed(0)}°</span>
-                            <span>{maxDeg.toFixed(0)}°</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
