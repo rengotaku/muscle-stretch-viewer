@@ -227,11 +227,11 @@ export const MuscleViewer: React.FC = () => {
     scene.background = new THREE.Color(0x0f172a); // Slate 900
     sceneRef.current = scene;
 
-    // Camera: MuJoCo uses Z-up
+    // Camera: MuJoCo uses Z-up. Positioned obliquely at side and slightly below to show hamstrings clearly
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.05, 50);
     camera.up.set(0, 0, 1);
-    camera.position.set(0, -2.4, 0.9);
-    camera.lookAt(0, 0, 0.85);
+    camera.position.set(1.9, -1.1, 0.55);
+    camera.lookAt(0, -0.05, 0.75);
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -241,7 +241,7 @@ export const MuscleViewer: React.FC = () => {
 
     // OrbitControls
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 0, 0.85);
+    controls.target.set(0, -0.05, 0.75);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.update();
@@ -386,17 +386,50 @@ export const MuscleViewer: React.FC = () => {
       cancelAnimationFrame(animFrameId);
       window.removeEventListener("resize", handleResize);
 
-      if (container && renderer.domElement) {
+      // 1. Dispose controls before removing canvas from DOM
+      controls.dispose();
+
+      // 2. Traverse scene to dispose geometries and materials without duplicates
+      const geometriesToDispose = new Set<THREE.BufferGeometry>();
+      const materialsToDispose = new Set<THREE.Material>();
+
+      scene.traverse((object) => {
+        if ("geometry" in object && object.geometry instanceof THREE.BufferGeometry) {
+          geometriesToDispose.add(object.geometry);
+        }
+        if ("material" in object) {
+          const mat = object.material;
+          if (Array.isArray(mat)) {
+            mat.forEach((m) => {
+              if (m instanceof THREE.Material) materialsToDispose.add(m);
+            });
+          } else if (mat instanceof THREE.Material) {
+            materialsToDispose.add(mat);
+          }
+        }
+      });
+
+      geometriesToDispose.forEach((g) => g.dispose());
+      materialsToDispose.forEach((m) => m.dispose());
+
+      // 3. Remove canvas from DOM
+      if (container && renderer.domElement && container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
+
+      // 4. Dispose renderer
       renderer.dispose();
+
+      // 5. Clear held refs to null
+      sceneRef.current = null;
+      muscleGroupRef.current = null;
 
       if (simRef.current) {
         simRef.current.dispose();
         simRef.current = null;
       }
     };
-  }, [updateMuscleMeshes]);
+  }, [supported, updateMuscleMeshes]);
 
   return (
     <div className="relative flex flex-col w-full h-[700px] bg-slate-950 rounded-xl overflow-hidden shadow-2xl border border-slate-800">
